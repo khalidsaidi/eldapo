@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { canSee, parseRequester } from '@/lib/access';
+import { forwardToCore } from '@/lib/coreProxy';
 import { getDb } from '@/lib/db';
 import { normalizeEntryRow } from '@/lib/entries';
 import { AppError, errorResponse } from '@/lib/errors';
@@ -39,6 +40,18 @@ export async function GET(
       rev: emptyToUndefined(request.nextUrl.searchParams.get('rev')),
       view: emptyToUndefined(request.nextUrl.searchParams.get('view')),
     });
+
+    if (parsedQuery.rev === undefined) {
+      const coreResponse = await forwardToCore(request, {
+        path: `/core/entries/${encodeURIComponent(id)}`,
+        includeQuery: true,
+        method: 'GET',
+      });
+
+      if (coreResponse) {
+        return coreResponse;
+      }
+    }
 
     let rows: Row[] = [];
     if (parsedQuery.rev !== undefined) {

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "core:dev": "tsx src/daemon/server.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -12,7 +13,10 @@
     "test:db": "ELDAPO_DB_TESTS=true vitest run tests/*.db.test.ts",
     "db:migrate": "tsx scripts/db/migrate.ts",
     "db:seed": "tsx scripts/db/seed.ts",
-    "db:explain": "tsx scripts/db/explain.ts"
+    "db:explain": "tsx scripts/db/explain.ts",
+    "bench:generate": "tsx scripts/bench/generate.ts",
+    "bench:load": "tsx scripts/bench/load.ts",
+    "bench:run": "tsx scripts/bench/run.ts"
   },
   "dependencies": {
     "dotenv": "^17.3.1",
@@ -20,12 +24,15 @@
     "postgres": "^3.4.8",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "roaring-wasm": "^1.1.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/autocannon": "^7.12.7",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "autocannon": "^8.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tsx": "^4.21.0",

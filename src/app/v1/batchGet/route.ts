@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { canSee, parseRequester } from '@/lib/access';
+import { forwardToCore } from '@/lib/coreProxy';
 import { getDb } from '@/lib/db';
 import { normalizeEntryRow } from '@/lib/entries';
 import { errorResponse } from '@/lib/errors';
@@ -30,6 +31,17 @@ const batchGetSchema = z.object({
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
+    const bodyText = await request.clone().text();
+    const coreResponse = await forwardToCore(request, {
+      path: '/core/batchGet',
+      method: 'POST',
+      bodyText,
+    });
+
+    if (coreResponse) {
+      return coreResponse;
+    }
+
     const payload = await readJsonBody(request);
     const parsedBody = batchGetSchema.parse(payload);
 

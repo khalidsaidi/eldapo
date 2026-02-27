@@ -7,6 +7,7 @@ import { decodeCursor, encodeCursor, normalizeEntryRow, type SearchCursor } from
 import { AppError, errorResponse } from '@/lib/errors';
 import { compileToSql } from '@/lib/filter/compileToSql';
 import { parseFilter } from '@/lib/filter/parser';
+import { forwardToCore } from '@/lib/coreProxy';
 import { emptyToUndefined } from '@/lib/http';
 import { toCard, toFull } from '@/lib/view';
 
@@ -36,6 +37,16 @@ const searchQuerySchema = z.object({
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
+    const coreResponse = await forwardToCore(request, {
+      path: '/core/search',
+      includeQuery: true,
+      method: 'GET',
+    });
+
+    if (coreResponse) {
+      return coreResponse;
+    }
+
     const parsedQuery = searchQuerySchema.parse({
       filter: emptyToUndefined(request.nextUrl.searchParams.get('filter')),
       q: emptyToUndefined(request.nextUrl.searchParams.get('q')),
