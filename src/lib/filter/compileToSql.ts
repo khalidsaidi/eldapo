@@ -2,7 +2,7 @@ import type { FilterNode } from '@/lib/filter/ast';
 
 export type CompiledSql = {
   sql: string;
-  params: Array<string | number>;
+  params: Array<string | number | Record<string, string[]>>;
 };
 
 type TopLevelKey = 'id' | 'type' | 'name' | 'namespace' | 'version' | 'rev';
@@ -20,9 +20,9 @@ type KeyResolution =
 const TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(['id', 'type', 'name', 'namespace', 'version', 'rev']);
 
 export function compileToSql(ast: FilterNode): CompiledSql {
-  const params: Array<string | number> = [];
+  const params: Array<string | number | Record<string, string[]>> = [];
 
-  function addParam(value: string | number): string {
+  function addParam(value: string | number | Record<string, string[]>): string {
     params.push(value);
     return `$${params.length}`;
   }
@@ -52,7 +52,10 @@ export function resolveFilterKey(inputKey: string): KeyResolution {
   return { kind: 'attr', key: inputKey };
 }
 
-function compileNode(ast: FilterNode, addParam: (value: string | number) => string): string {
+function compileNode(
+  ast: FilterNode,
+  addParam: (value: string | number | Record<string, string[]>) => string,
+): string {
   switch (ast.kind) {
     case 'and': {
       if (ast.children.length === 0) {
@@ -86,8 +89,8 @@ function compileNode(ast: FilterNode, addParam: (value: string | number) => stri
         return `(${target.field} IS NOT NULL AND ${target.field} <> '')`;
       }
 
-      const keyRef = addParam(target.key);
-      return `(attrs ? ${keyRef}::text)`;
+      const presenceRef = addParam({ [target.key]: [] });
+      return `(attrs @> ${presenceRef}::jsonb)`;
     }
 
     case 'eq': {
@@ -106,9 +109,8 @@ function compileNode(ast: FilterNode, addParam: (value: string | number) => stri
         return `(${target.field} = ${valueRef})`;
       }
 
-      const keyRef = addParam(target.key);
-      const valueRef = addParam(ast.value);
-      return `(COALESCE(jsonb_extract_path(attrs, ${keyRef}::text) ? ${valueRef}::text, false))`;
+      const containsRef = addParam({ [target.key]: [ast.value] });
+      return `(attrs @> ${containsRef}::jsonb)`;
     }
 
     default: {

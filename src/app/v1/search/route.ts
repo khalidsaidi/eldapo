@@ -25,6 +25,8 @@ type Row = {
   updated_at: Date | string;
 };
 
+type SearchSqlParam = string | number | Record<string, string[]>;
+
 const searchQuerySchema = z.object({
   filter: z.string().optional(),
   q: z.string().optional(),
@@ -46,7 +48,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
 
     let baseFilterSql = 'TRUE';
-    let baseFilterParams: Array<string | number> = [];
+    let baseFilterParams: SearchSqlParam[] = [];
 
     if (parsedQuery.filter) {
       const ast = parseFilter(parsedQuery.filter);
@@ -72,7 +74,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     while (visibleRows.length < parsedQuery.limit) {
       const whereClauses: string[] = [baseFilterSql];
-      const params: Array<string | number> = [...baseFilterParams];
+      const params: SearchSqlParam[] = [...baseFilterParams];
 
       if (parsedQuery.q) {
         params.push(`%${parsedQuery.q}%`);
@@ -92,23 +94,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const limitRef = `$${params.length}`;
 
       const sqlText = `
-        WITH latest AS (
-          SELECT DISTINCT ON (id)
-            id,
-            rev,
-            type,
-            namespace,
-            name,
-            description,
-            version,
-            attrs,
-            manifest,
-            meta,
-            created_at,
-            updated_at
-          FROM entries
-          ORDER BY id, rev DESC
-        )
         SELECT
           id,
           rev,
@@ -122,7 +107,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           meta,
           created_at,
           updated_at
-        FROM latest
+        FROM entries_latest
         WHERE ${whereClauses.join(' AND ')}
         ORDER BY updated_at DESC, id DESC
         LIMIT ${limitRef}

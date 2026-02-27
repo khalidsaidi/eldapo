@@ -47,6 +47,19 @@ export async function POST(request: Request): Promise<NextResponse> {
       )) as NextRevRow[];
 
       const nextRev = Number(nextRevRows[0]?.next_rev ?? 1);
+      const insertParams: unknown[] = [
+        entry.id,
+        nextRev,
+        entry.type,
+        entry.namespace,
+        entry.name,
+        entry.description,
+        entry.version ?? null,
+        normalizedAttrs,
+        entry.manifest ?? null,
+        entry.meta ?? null,
+      ];
+
       const insertedRows = (await tx.unsafe(
         `
           INSERT INTO entries (
@@ -75,21 +88,64 @@ export async function POST(request: Request): Promise<NextResponse> {
           )
           RETURNING id, rev, updated_at
         `,
-        [
-          entry.id,
-          nextRev,
-          entry.type,
-          entry.namespace,
-          entry.name,
-          entry.description,
-          entry.version ?? null,
-          JSON.stringify(normalizedAttrs),
-          entry.manifest === undefined ? null : JSON.stringify(entry.manifest),
-          entry.meta === undefined ? null : JSON.stringify(entry.meta),
-        ],
+        insertParams as never[],
       )) as PublishedRow[];
 
-      return insertedRows[0] ?? null;
+      const inserted = insertedRows[0] ?? null;
+      if (!inserted) {
+        return null;
+      }
+
+      await tx.unsafe(
+        `
+          INSERT INTO entries_latest (
+            id,
+            rev,
+            type,
+            namespace,
+            name,
+            description,
+            version,
+            attrs,
+            manifest,
+            meta,
+            created_at,
+            updated_at
+          )
+          SELECT
+            id,
+            rev,
+            type,
+            namespace,
+            name,
+            description,
+            version,
+            attrs,
+            manifest,
+            meta,
+            created_at,
+            updated_at
+          FROM entries
+          WHERE id = $1 AND rev = $2
+          ON CONFLICT (id) DO UPDATE
+          SET
+            rev = EXCLUDED.rev,
+            type = EXCLUDED.type,
+            namespace = EXCLUDED.namespace,
+            name = EXCLUDED.name,
+            description = EXCLUDED.description,
+            version = EXCLUDED.version,
+            attrs = EXCLUDED.attrs,
+            manifest = EXCLUDED.manifest,
+            meta = EXCLUDED.meta,
+            created_at = EXCLUDED.created_at,
+            updated_at = EXCLUDED.updated_at
+          WHERE entries_latest.rev <= EXCLUDED.rev
+        `,
+        [inserted.id, inserted.rev],
+      );
+
+      return inserted;
     });
 
     if (!published) {
