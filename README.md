@@ -124,6 +124,23 @@ Then requester context is read from:
 
 Filter grammar is documented in [docs/filter.ebnf](docs/filter.ebnf). Key mapping rules are in [docs/spec.md](docs/spec.md).
 
+## Performance Debugging
+
+Inspect representative query plans locally:
+
+```bash
+pnpm db:explain
+```
+
+The helper runs `EXPLAIN (ANALYZE, BUFFERS)` for:
+- `(type=skill)`
+- `(&(type=skill)(capability=summarize))`
+- `(&(type=rag)(capability=retrieve)(tag=finance))`
+
+Notes:
+- Attribute equality compiles to JSONB containment (`attrs @> ...`).
+- Presence remains key-exists (`attrs ? key`) and uses the `entries_attrs_ops_gin` index.
+
 ## Deployment Notes (Vercel-friendly)
 
 Set env vars:
@@ -141,3 +158,4 @@ Set env vars:
 - `pnpm test:watch`
 - `pnpm db:migrate`
 - `pnpm db:seed`
+- `pnpm db:explain`

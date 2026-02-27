@@ -106,9 +106,8 @@ function compileNode(ast: FilterNode, addParam: (value: string | number) => stri
         return `(${target.field} = ${valueRef})`;
       }
 
-      const keyRef = addParam(target.key);
-      const valueRef = addParam(ast.value);
-      return `(COALESCE(jsonb_extract_path(attrs, ${keyRef}::text) ? ${valueRef}::text, false))`;
+      const jsonRef = addParam(JSON.stringify({ [target.key]: [ast.value] }));
+      return `(attrs @> (${jsonRef}::text)::jsonb)`;
     }
 
     default: {
