@@ -10,6 +10,7 @@ LDAP-inspired capability directory API for agents (MCP/RAG/skills), built with N
 - Endpoints for search, get, versions, batch get, publish, and status updates
 - Incremental change feed for agent cache refresh
 - `entries_latest` table for fast latest-entry reads
+- Optional `eldapo-core` daemon with in-memory inverted index and roaring bitmaps
 - Local Postgres via Docker Compose
 - Unit tests with Vitest
 
@@ -34,6 +35,14 @@ pnpm dev
 
 Service runs at `http://localhost:3000`.
 
+Optional core daemon (for index-backed reads):
+
+```bash
+pnpm core:dev
+```
+
+Core service runs at `http://127.0.0.1:4100` by default.
+
 ## API Endpoints
 
 Canonical:
@@ -48,6 +57,14 @@ Canonical:
 Rewrite-compatible:
 - `POST /v1/entries:publish`
 - `POST /v1/entries/{id}:setStatus`
+
+Core daemon endpoints (additive):
+- `GET /core/health`
+- `GET /core/stats`
+- `GET /core/search`
+- `GET /core/entries/{id}`
+- `POST /core/batchGet`
+- `GET /core/changes`
 
 ## Example cURL
 
@@ -151,6 +168,37 @@ Notes:
 - Presence remains key-exists (`attrs ? key`) and uses the `entries_attrs_ops_gin` index.
 - Search/get-latest/batchGet read from `entries_latest` to avoid per-request latest-revision recomputation.
 
+Enable core-forwarding for `/v1` search/latest/batch reads:
+
+```bash
+ELDAPPO_USE_CORE=true
+ELDAPPO_CORE_URL=http://127.0.0.1:4100
+```
+
+With this flag, `/v1/search`, latest `/v1/entries/{id}`, and `/v1/batchGet` forward to the core daemon when reachable and fall back to SQL if not.
+
+## Benchmarks
+
+Generate synthetic datasets:
+
+```bash
+pnpm bench:generate
+```
+
+Load a dataset:
+
+```bash
+pnpm bench:load --file=.ai/bench/dataset-10000.jsonl --truncate
+```
+
+Run latency/QPS comparison (SQL + core):
+
+```bash
+pnpm bench:run
+```
+
+Benchmark JSON output is written to `.ai/bench/` (untracked).
+
 ## Deployment Notes (Vercel-friendly)
 
 Set env vars:
@@ -158,6 +206,9 @@ Set env vars:
 - `ELDAPPO_TRUSTED_HEADERS` (only enable behind a trusted auth proxy)
 - `ELDAPPO_ENABLE_WRITES=false` by default
 - `ELDAPPO_ADMIN_KEY` (required if writes are enabled)
+- `ELDAPPO_USE_CORE` (`true` to forward selected `/v1` reads to `eldapo-core`)
+- `ELDAPPO_CORE_URL` (default `http://127.0.0.1:4100`)
+- `ELDAPPO_CORE_PORT` / `ELDAPPO_CORE_POLL_MS` (daemon runtime tuning)
 
 ## Agent Caching Strategy
 
@@ -179,3 +230,7 @@ Set env vars:
 - `pnpm db:migrate`
 - `pnpm db:seed`
 - `pnpm db:explain`
+- `pnpm core:dev`
+- `pnpm bench:generate`
+- `pnpm bench:load --file=...`
+- `pnpm bench:run`

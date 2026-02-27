@@ -8,7 +8,7 @@ describe('compileToSql', () => {
     const ast = parseFilter('(&(type=skill)(capability=summarize))');
     const compiled = compileToSql(ast);
 
-    expect(compiled.sql).toBe('((type = $1) AND (attrs @> ($2::text)::jsonb))');
+    expect(compiled.sql).toBe('((type = $1) AND (attrs @> $2::jsonb))');
     expect(compiled.params).toEqual(['skill', '{"capability":["summarize"]}']);
   });
 

@@ -1,4 +1,4 @@
-# eldapo Spec (v0.3)
+# eldapo Spec (v0.3 + core accelerator)
 
 `eldapo` is an LDAP-inspired capability directory for agents. Entries are immutable by revision (`id`, `rev`) and queryable with a tiny filter language.
 
@@ -20,6 +20,7 @@ An entry has:
 Storage tables:
 - `entries`: immutable revision history (`id`, `rev`)
 - `entries_latest`: one latest row per `id` for fast current lookups
+- `changes`: ordered change log (`seq`, `id`, `rev`, `change_type`, `changed_at`)
 
 Visibility policy keys in `attrs`:
 - `visibility`: `public` | `internal` | `restricted` (default: public)
@@ -39,6 +40,14 @@ Canonical routes:
 Compatibility rewrites also support:
 - `POST /v1/entries:publish` -> `/v1/entries/publish`
 - `POST /v1/entries/{id}:setStatus` -> `/v1/entries/{id}/setStatus`
+
+Optional core daemon routes (additive, internal acceleration):
+- `GET /core/health`
+- `GET /core/stats`
+- `GET /core/search`
+- `GET /core/entries/{id}`
+- `POST /core/batchGet`
+- `GET /core/changes`
 
 Default views:
 - `search`: `card` unless `view=full`
@@ -71,6 +80,11 @@ Grammar reference:
   - specific `rev`: `entries`
 - `POST /v1/batchGet` reads from `entries_latest`.
 - `GET /v1/entries/{id}/versions` reads from `entries`.
+
+Core-forwarded read mode:
+- When `ELDAPPO_USE_CORE=true`, `/v1/search`, latest `/v1/entries/{id}`, and `/v1/batchGet` are forwarded to `eldapo-core` if reachable.
+- If core is unreachable, routes fall back to SQL path.
+- Core keeps an in-memory inverted index built from `entries_latest` and refreshed by polling `changes`.
 
 ## Change Feed
 
