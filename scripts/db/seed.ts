@@ -136,6 +136,19 @@ const sql = postgres(databaseUrl, { max: 1 });
 
 async function run(): Promise<void> {
   for (const entry of seedEntries) {
+    const entryParams: unknown[] = [
+      entry.id,
+      entry.rev,
+      entry.type,
+      entry.namespace,
+      entry.name,
+      entry.description,
+      entry.version,
+      entry.attrs,
+      entry.manifest,
+      entry.meta,
+    ];
+
     await sql.unsafe(
       `
         INSERT INTO entries (
@@ -164,18 +177,56 @@ async function run(): Promise<void> {
         )
         ON CONFLICT (id, rev) DO NOTHING
       `,
-      [
-        entry.id,
-        entry.rev,
-        entry.type,
-        entry.namespace,
-        entry.name,
-        entry.description,
-        entry.version,
-        JSON.stringify(entry.attrs),
-        entry.manifest === null ? null : JSON.stringify(entry.manifest),
-        entry.meta === null ? null : JSON.stringify(entry.meta),
-      ],
+      entryParams as never[],
+    );
+
+    await sql.unsafe(
+      `
+        INSERT INTO entries_latest (
+          id,
+          rev,
+          type,
+          namespace,
+          name,
+          description,
+          version,
+          attrs,
+          manifest,
+          meta,
+          created_at,
+          updated_at
+        )
+        SELECT
+          id,
+          rev,
+          type,
+          namespace,
+          name,
+          description,
+          version,
+          attrs,
+          manifest,
+          meta,
+          created_at,
+          updated_at
+        FROM entries
+        WHERE id = $1 AND rev = $2
+        ON CONFLICT (id) DO UPDATE
+        SET
+          rev = EXCLUDED.rev,
+          type = EXCLUDED.type,
+          namespace = EXCLUDED.namespace,
+          name = EXCLUDED.name,
+          description = EXCLUDED.description,
+          version = EXCLUDED.version,
+          attrs = EXCLUDED.attrs,
+          manifest = EXCLUDED.manifest,
+          meta = EXCLUDED.meta,
+          created_at = EXCLUDED.created_at,
+          updated_at = EXCLUDED.updated_at
+        WHERE entries_latest.rev <= EXCLUDED.rev
+      `,
+      [entry.id, entry.rev],
     );
   }
 

@@ -92,23 +92,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const limitRef = `$${params.length}`;
 
       const sqlText = `
-        WITH latest AS (
-          SELECT DISTINCT ON (id)
-            id,
-            rev,
-            type,
-            namespace,
-            name,
-            description,
-            version,
-            attrs,
-            manifest,
-            meta,
-            created_at,
-            updated_at
-          FROM entries
-          ORDER BY id, rev DESC
-        )
         SELECT
           id,
           rev,
@@ -122,7 +105,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           meta,
           created_at,
           updated_at
-        FROM latest
+        FROM entries_latest
         WHERE ${whereClauses.join(' AND ')}
         ORDER BY updated_at DESC, id DESC
         LIMIT ${limitRef}

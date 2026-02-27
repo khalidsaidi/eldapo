@@ -8,6 +8,7 @@ LDAP-inspired capability directory API for agents (MCP/RAG/skills), built with N
 - Search with LDAP-like filter syntax compiled to parameterized SQL
 - Visibility controls (`public` / `internal` / `restricted`)
 - Endpoints for search, get, versions, batch get, publish, and status updates
+- `entries_latest` table for fast latest-entry reads
 - Local Postgres via Docker Compose
 - Unit tests with Vitest
 
@@ -140,6 +141,7 @@ The helper runs `EXPLAIN (ANALYZE, BUFFERS)` for:
 Notes:
 - Attribute equality compiles to JSONB containment (`attrs @> ...`).
 - Presence remains key-exists (`attrs ? key`) and uses the `entries_attrs_ops_gin` index.
+- Search/get-latest/batchGet read from `entries_latest` to avoid per-request latest-revision recomputation.
 
 ## Deployment Notes (Vercel-friendly)
 
@@ -156,6 +158,7 @@ Set env vars:
 - `pnpm start`
 - `pnpm test`
 - `pnpm test:watch`
+- `pnpm test:db` (optional, requires `ELDAPO_DB_TESTS=true` and running Postgres seed data)
 - `pnpm db:migrate`
 - `pnpm db:seed`
 - `pnpm db:explain`

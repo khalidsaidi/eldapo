@@ -21,13 +21,15 @@ export type SearchCursor = {
 };
 
 export function normalizeAttrs(value: unknown): EntryAttrs {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  const parsedValue = parseJsonMaybe(value);
+
+  if (!parsedValue || typeof parsedValue !== 'object' || Array.isArray(parsedValue)) {
     return {};
   }
 
   const output: EntryAttrs = {};
 
-  for (const [key, rawAttr] of Object.entries(value)) {
+  for (const [key, rawAttr] of Object.entries(parsedValue)) {
     if (Array.isArray(rawAttr)) {
       output[key] = rawAttr.map((item) => String(item));
       continue;
@@ -54,8 +56,8 @@ export function normalizeEntryRow(row: RawEntryRow): EntryRecord {
     description: row.description ?? '',
     version: row.version ?? null,
     attrs: normalizeAttrs(row.attrs),
-    manifest: row.manifest ?? null,
-    meta: row.meta ?? null,
+    manifest: parseJsonMaybe(row.manifest) ?? null,
+    meta: parseJsonMaybe(row.meta) ?? null,
     created_at: toIsoString(row.created_at),
     updated_at: toIsoString(row.updated_at),
   };
@@ -94,4 +96,16 @@ function toIsoString(value: Date | string): string {
   }
 
   return asDate.toISOString();
+}
+
+function parseJsonMaybe(value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
 }

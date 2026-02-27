@@ -35,24 +35,6 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const rows = (await getDb().unsafe(
       `
-        WITH latest AS (
-          SELECT DISTINCT ON (id)
-            id,
-            rev,
-            type,
-            namespace,
-            name,
-            description,
-            version,
-            attrs,
-            manifest,
-            meta,
-            created_at,
-            updated_at
-          FROM entries
-          WHERE id = ANY($1::text[])
-          ORDER BY id, rev DESC
-        )
         SELECT
           id,
           rev,
@@ -66,7 +48,8 @@ export async function POST(request: Request): Promise<NextResponse> {
           meta,
           created_at,
           updated_at
-        FROM latest
+        FROM entries_latest
+        WHERE id = ANY($1::text[])
       `,
       [parsedBody.ids],
     )) as Row[];
