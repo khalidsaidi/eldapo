@@ -8,6 +8,7 @@ LDAP-inspired capability directory API for agents (MCP/RAG/skills), built with N
 - Search with LDAP-like filter syntax compiled to parameterized SQL
 - Visibility controls (`public` / `internal` / `restricted`)
 - Endpoints for search, get, versions, batch get, publish, and status updates
+- Incremental change feed for agent cache refresh
 - `entries_latest` table for fast latest-entry reads
 - Local Postgres via Docker Compose
 - Unit tests with Vitest
@@ -40,6 +41,7 @@ Canonical:
 - `GET /v1/entries/{id}`
 - `GET /v1/entries/{id}/versions`
 - `POST /v1/batchGet`
+- `GET /v1/changes`
 - `POST /v1/entries/publish`
 - `POST /v1/entries/{id}/setStatus`
 
@@ -71,6 +73,12 @@ List versions:
 
 ```bash
 curl "http://localhost:3000/v1/entries/skill:acme:pdf-summarize/versions"
+```
+
+Read changes since sequence `0`:
+
+```bash
+curl "http://localhost:3000/v1/changes?since=0&limit=50"
 ```
 
 Batch get:
@@ -150,6 +158,13 @@ Set env vars:
 - `ELDAPPO_TRUSTED_HEADERS` (only enable behind a trusted auth proxy)
 - `ELDAPPO_ENABLE_WRITES=false` by default
 - `ELDAPPO_ADMIN_KEY` (required if writes are enabled)
+
+## Agent Caching Strategy
+
+- Cache entries by `{id, rev}`.
+- Poll `GET /v1/changes?since=<last_seq>&limit=...` to discover updates.
+- For each change event, fetch latest entry by id and refresh local cache pointers.
+- Use `next_since` from the response for the next poll.
 
 ## Scripts
 
