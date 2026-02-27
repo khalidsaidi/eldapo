@@ -145,6 +145,12 @@ export async function POST(request: Request): Promise<NextResponse> {
         [inserted.id, inserted.rev],
       );
 
+      await tx.unsafe(`INSERT INTO changes (id, rev, change_type) VALUES ($1, $2, $3)`, [
+        inserted.id,
+        inserted.rev,
+        'publish',
+      ]);
+
       return inserted;
     });
 

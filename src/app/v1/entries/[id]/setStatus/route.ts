@@ -182,6 +182,12 @@ export async function POST(
         [insertedRow.id, insertedRow.rev],
       );
 
+      await tx.unsafe(`INSERT INTO changes (id, rev, change_type) VALUES ($1, $2, $3)`, [
+        insertedRow.id,
+        insertedRow.rev,
+        'set_status',
+      ]);
+
       return insertedRow;
     });
 

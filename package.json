@@ -9,7 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:db": "ELDAPO_DB_TESTS=true vitest run tests/latest-versions.db.test.ts",
+    "test:db": "ELDAPO_DB_TESTS=true vitest run tests/*.db.test.ts",
     "db:migrate": "tsx scripts/db/migrate.ts",
     "db:seed": "tsx scripts/db/seed.ts",
     "db:explain": "tsx scripts/db/explain.ts"

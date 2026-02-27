@@ -32,6 +32,7 @@ Canonical routes:
 - `GET /v1/entries/{id}`
 - `GET /v1/entries/{id}/versions`
 - `POST /v1/batchGet`
+- `GET /v1/changes`
 - `POST /v1/entries/publish`
 - `POST /v1/entries/{id}/setStatus`
 
@@ -70,3 +71,22 @@ Grammar reference:
   - specific `rev`: `entries`
 - `POST /v1/batchGet` reads from `entries_latest`.
 - `GET /v1/entries/{id}/versions` reads from `entries`.
+
+## Change Feed
+
+- `GET /v1/changes?since=<seq>&limit=<n>`
+- Returns:
+  - `events`: ordered by ascending `seq`
+  - `next_since`: the highest sequence in the page (or the same input `since` when empty)
+
+Event shape:
+- `seq` (bigint sequence)
+- `id`
+- `rev`
+- `change_type` (`publish` | `set_status`)
+- `changed_at`
+
+Agent cache pattern:
+- Maintain a local cursor (`since`).
+- Poll `/v1/changes` and update cache keys by `{id, rev}`.
+- Advance cursor to `next_since`.
