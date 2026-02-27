@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: eldapo
+      POSTGRES_PASSWORD: eldapo
+      POSTGRES_DB: eldapo
+    volumes:
+      - eldapo_pgdata:/var/lib/postgresql/data
+
+volumes:
+  eldapo_pgdata:
