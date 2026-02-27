@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate": "tsx scripts/db/migrate.ts",
-    "db:seed": "tsx scripts/db/seed.ts"
+    "db:seed": "tsx scripts/db/seed.ts",
+    "db:explain": "tsx scripts/db/explain.ts"
   },
   "dependencies": {
     "dotenv": "^17.3.1",

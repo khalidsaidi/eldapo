@@ -8,16 +8,8 @@ describe('compileToSql', () => {
     const ast = parseFilter('(&(type=skill)(capability=summarize))');
     const compiled = compileToSql(ast);
 
-    expect(compiled).toMatchInlineSnapshot(`
-      {
-        "params": [
-          "skill",
-          "capability",
-          "summarize",
-        ],
-        "sql": "((type = $1) AND (COALESCE(jsonb_extract_path(attrs, $2::text) ? $3::text, false)))",
-      }
-    `);
+    expect(compiled.sql).toBe('((type = $1) AND (attrs @> ($2::text)::jsonb))');
+    expect(compiled.params).toEqual(['skill', '{"capability":["summarize"]}']);
   });
 
   it('compiles rev as integer comparison', () => {
@@ -48,10 +40,17 @@ describe('compileToSql', () => {
     const ast = parseFilter('(&(attrs.tag=finance)(namespace=acme)(rev=2))');
     const compiled = compileToSql(ast);
 
-    expect(compiled.params).toEqual(['tag', 'finance', 'acme', 2]);
+    expect(compiled.params).toEqual(['{"tag":["finance"]}', 'acme', 2]);
     expect(compiled.sql).toContain('$1');
     expect(compiled.sql).toContain('$2');
     expect(compiled.sql).toContain('$3');
-    expect(compiled.sql).toContain('$4');
+  });
+
+  it('keeps presence semantics using key-exists operator', () => {
+    const ast = parseFilter('(endpoint=*)');
+    const compiled = compileToSql(ast);
+
+    expect(compiled.sql).toBe('(attrs ? $1::text)');
+    expect(compiled.params).toEqual(['endpoint']);
   });
 });

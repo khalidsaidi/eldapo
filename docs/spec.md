@@ -46,6 +46,11 @@ Default views:
   - `attrs.<key>` maps to JSON attributes directly.
   - Top-level keys: `id`, `type`, `name`, `namespace`, `version`, `rev`.
   - Any other key is treated as `attrs.<key>` shorthand.
+- Attribute equality (`(capability=summarize)`) compiles to JSON containment:
+  - `attrs @> '{"capability":["summarize"]}'::jsonb`
+- Presence keeps LDAP-like key-exists semantics:
+  - `(endpoint=*)` => `attrs ? 'endpoint'`
+  - Supported by GIN `jsonb_ops` index on `attrs` (`entries_attrs_ops_gin`).
 
 Example:
 - `(&(type=skill)(capability=summarize))`
