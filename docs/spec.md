@@ -1,4 +1,4 @@
-# eldapo Spec (v0.1)
+# eldapo Spec (v0.3)
 
 `eldapo` is an LDAP-inspired capability directory for agents. Entries are immutable by revision (`id`, `rev`) and queryable with a tiny filter language.
 
@@ -76,8 +76,8 @@ Grammar reference:
 
 - `GET /v1/changes?since=<seq>&limit=<n>`
 - Returns:
-  - `events`: ordered by ascending `seq`
-  - `next_since`: the highest sequence in the page (or the same input `since` when empty)
+  - `events`: ordered by ascending `seq`, visibility-filtered for requester context
+  - `next_since`: highest scanned sequence (not just highest returned event)
 
 Event shape:
 - `seq` (bigint sequence)
@@ -90,3 +90,4 @@ Agent cache pattern:
 - Maintain a local cursor (`since`).
 - Poll `/v1/changes` and update cache keys by `{id, rev}`.
 - Advance cursor to `next_since`.
+- Hidden events still advance `next_since`, preventing infinite re-poll loops on unseen changes.
