@@ -163,8 +163,10 @@ Set env vars:
 
 - Cache entries by `{id, rev}`.
 - Poll `GET /v1/changes?since=<last_seq>&limit=...` to discover updates.
+- `/v1/changes` is visibility-aware: events the requester cannot see are omitted.
 - For each change event, fetch latest entry by id and refresh local cache pointers.
 - Use `next_since` from the response for the next poll.
+- `next_since` advances by scanned sequence (even when all scanned events are hidden), so clients do not get stuck.
 
 ## Scripts
 
