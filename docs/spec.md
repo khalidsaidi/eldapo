@@ -1,4 +1,4 @@
-# eldapo Spec (v0.1)
+# eldapo Spec (v0.1 / v0.2 internals)
 
 `eldapo` is an LDAP-inspired capability directory for agents. Entries are immutable by revision (`id`, `rev`) and queryable with a tiny filter language.
 
@@ -16,6 +16,13 @@ An entry has:
 - `manifest` (jsonb, nullable)
 - `meta` (jsonb, nullable)
 - `created_at`, `updated_at` (timestamptz)
+
+`entries` remains the immutable history table.
+
+`entries_latest` stores one current row per `id` for fast lookup/search:
+- same columns as `entries`
+- primary key on `id`
+- maintained on publish/status writes
 
 Visibility policy keys in `attrs`:
 - `visibility`: `public` | `internal` | `restricted` (default: public)
@@ -46,9 +53,24 @@ Default views:
   - `attrs.<key>` maps to JSON attributes directly.
   - Top-level keys: `id`, `type`, `name`, `namespace`, `version`, `rev`.
   - Any other key is treated as `attrs.<key>` shorthand.
+- Attribute equality (`(capability=summarize)`) compiles to JSON containment:
+  - `attrs @> '{"capability":["summarize"]}'::jsonb`
+  - This is designed to use the GIN `jsonb_path_ops` index on `attrs`.
+- Presence (`(endpoint=*)`) also uses containment:
+  - `attrs @> '{"endpoint":[]}'::jsonb`
+  - Semantics: key exists and maps to an array-like JSON value.
 
 Example:
 - `(&(type=skill)(capability=summarize))`
 
 Grammar reference:
 - See [filter.ebnf](./filter.ebnf)
+
+## Query Paths
+
+- `GET /v1/search`: reads from `entries_latest`.
+- `GET /v1/entries/{id}`:
+  - latest (no `rev`): reads from `entries_latest`
+  - specific `rev`: reads from `entries`
+- `POST /v1/batchGet`: reads from `entries_latest`
+- `GET /v1/entries/{id}/versions`: reads from `entries`

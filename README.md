@@ -6,8 +6,10 @@ LDAP-inspired capability directory API for agents (MCP/RAG/skills), built with N
 
 - Immutable, revisioned entries (`id`, `rev`)
 - Search with LDAP-like filter syntax compiled to parameterized SQL
+- Attribute filter equality compiled to JSON containment (`attrs @> ...`) for GIN index use
 - Visibility controls (`public` / `internal` / `restricted`)
 - Endpoints for search, get, versions, batch get, publish, and status updates
+- `entries_latest` table for fast latest-row lookups
 - Local Postgres via Docker Compose
 - Unit tests with Vitest
 
@@ -124,6 +126,18 @@ Then requester context is read from:
 
 Filter grammar is documented in [docs/filter.ebnf](docs/filter.ebnf). Key mapping rules are in [docs/spec.md](docs/spec.md).
 
+## Performance Notes
+
+- Attribute equality predicates compile to `attrs @> $json::jsonb` so Postgres can use the `GIN (attrs jsonb_path_ops)` index.
+- Presence predicates use `attrs @> '{"key":[]}'::jsonb` (key exists with array-like value).
+- Search/latest read paths query `entries_latest` to avoid recomputing `DISTINCT ON (id)` for every request.
+
+Inspect representative plans locally:
+
+```bash
+pnpm db:explain
+```
+
 ## Deployment Notes (Vercel-friendly)
 
 Set env vars:
@@ -141,3 +155,4 @@ Set env vars:
 - `pnpm test:watch`
 - `pnpm db:migrate`
 - `pnpm db:seed`
+- `pnpm db:explain`

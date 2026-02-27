@@ -12,10 +12,13 @@ describe('compileToSql', () => {
       {
         "params": [
           "skill",
-          "capability",
-          "summarize",
+          {
+            "capability": [
+              "summarize",
+            ],
+          },
         ],
-        "sql": "((type = $1) AND (COALESCE(jsonb_extract_path(attrs, $2::text) ? $3::text, false)))",
+        "sql": "((type = $1) AND (attrs @> $2::jsonb))",
       }
     `);
   });
@@ -48,10 +51,17 @@ describe('compileToSql', () => {
     const ast = parseFilter('(&(attrs.tag=finance)(namespace=acme)(rev=2))');
     const compiled = compileToSql(ast);
 
-    expect(compiled.params).toEqual(['tag', 'finance', 'acme', 2]);
+    expect(compiled.params).toEqual([{ tag: ['finance'] }, 'acme', 2]);
     expect(compiled.sql).toContain('$1');
     expect(compiled.sql).toContain('$2');
     expect(compiled.sql).toContain('$3');
-    expect(compiled.sql).toContain('$4');
+  });
+
+  it('compiles presence using JSON containment', () => {
+    const ast = parseFilter('(endpoint=*)');
+    const compiled = compileToSql(ast);
+
+    expect(compiled.params).toEqual([{ endpoint: [] }]);
+    expect(compiled.sql).toBe('(attrs @> $1::jsonb)');
   });
 });
