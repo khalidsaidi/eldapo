@@ -74,14 +74,28 @@ export async function POST(
       const nextAttrs = normalizeAttrs(latest.attrs);
       nextAttrs.status = [parsedBody.status];
 
+      const parsedMeta = toJsonbParam(latest.meta);
       const nextMeta =
-        latest.meta && typeof latest.meta === 'object' && !Array.isArray(latest.meta)
-          ? { ...(latest.meta as Record<string, unknown>) }
+        parsedMeta && typeof parsedMeta === 'object' && !Array.isArray(parsedMeta)
+          ? { ...(parsedMeta as Record<string, unknown>) }
           : {};
 
       if (parsedBody.reason) {
         nextMeta.reason = parsedBody.reason;
       }
+
+      const insertParams: unknown[] = [
+        latest.id,
+        nextRev,
+        latest.type,
+        latest.namespace,
+        latest.name,
+        latest.description,
+        latest.version,
+        nextAttrs,
+        toJsonbParam(latest.manifest),
+        nextMeta,
+      ];
 
       const inserted = (await tx.unsafe(
         `
@@ -111,21 +125,64 @@ export async function POST(
           )
           RETURNING id, rev, updated_at
         `,
-        [
-          latest.id,
-          nextRev,
-          latest.type,
-          latest.namespace,
-          latest.name,
-          latest.description,
-          latest.version,
-          JSON.stringify(nextAttrs),
-          latest.manifest === null ? null : JSON.stringify(latest.manifest),
-          JSON.stringify(nextMeta),
-        ],
+        insertParams as never[],
       )) as UpdatedRow[];
 
-      return inserted[0] ?? null;
+      const insertedRow = inserted[0] ?? null;
+      if (!insertedRow) {
+        return null;
+      }
+
+      await tx.unsafe(
+        `
+          INSERT INTO entries_latest (
+            id,
+            rev,
+            type,
+            namespace,
+            name,
+            description,
+            version,
+            attrs,
+            manifest,
+            meta,
+            created_at,
+            updated_at
+          )
+          SELECT
+            id,
+            rev,
+            type,
+            namespace,
+            name,
+            description,
+            version,
+            attrs,
+            manifest,
+            meta,
+            created_at,
+            updated_at
+          FROM entries
+          WHERE id = $1 AND rev = $2
+          ON CONFLICT (id) DO UPDATE
+          SET
+            rev = EXCLUDED.rev,
+            type = EXCLUDED.type,
+            namespace = EXCLUDED.namespace,
+            name = EXCLUDED.name,
+            description = EXCLUDED.description,
+            version = EXCLUDED.version,
+            attrs = EXCLUDED.attrs,
+            manifest = EXCLUDED.manifest,
+            meta = EXCLUDED.meta,
+            created_at = EXCLUDED.created_at,
+            updated_at = EXCLUDED.updated_at
+          WHERE entries_latest.rev <= EXCLUDED.rev
+        `,
+        [insertedRow.id, insertedRow.rev],
+      );
+
+      return insertedRow;
     });
 
     if (!updated) {
@@ -143,5 +200,21 @@ export async function POST(
     });
   } catch (error) {
     return errorResponse(error);
+  }
+}
+
+function toJsonbParam(value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
   }
 }

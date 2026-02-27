@@ -26,25 +26,8 @@ async function run(): Promise<void> {
 
     const explainSql = `
       EXPLAIN (ANALYZE, BUFFERS)
-      WITH latest AS (
-        SELECT DISTINCT ON (id)
-          id,
-          rev,
-          type,
-          namespace,
-          name,
-          description,
-          version,
-          attrs,
-          manifest,
-          meta,
-          created_at,
-          updated_at
-        FROM entries
-        ORDER BY id, rev DESC
-      )
       SELECT id, rev, type, namespace, name, description, version, attrs, updated_at
-      FROM latest
+      FROM entries_latest
       WHERE ${compiled.sql}
       ORDER BY updated_at DESC, id DESC
       LIMIT 20

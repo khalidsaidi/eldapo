@@ -79,9 +79,8 @@ export async function GET(
             meta,
             created_at,
             updated_at
-          FROM entries
+          FROM entries_latest
           WHERE id = $1
-          ORDER BY rev DESC
           LIMIT 1
         `,
         [id],

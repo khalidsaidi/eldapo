@@ -17,6 +17,10 @@ An entry has:
 - `meta` (jsonb, nullable)
 - `created_at`, `updated_at` (timestamptz)
 
+Storage tables:
+- `entries`: immutable revision history (`id`, `rev`)
+- `entries_latest`: one latest row per `id` for fast current lookups
+
 Visibility policy keys in `attrs`:
 - `visibility`: `public` | `internal` | `restricted` (default: public)
 - `allowed_group`: groups for restricted entries
@@ -57,3 +61,12 @@ Example:
 
 Grammar reference:
 - See [filter.ebnf](./filter.ebnf)
+
+## Read Paths
+
+- `GET /v1/search` reads from `entries_latest`.
+- `GET /v1/entries/{id}`:
+  - latest (no `rev`): `entries_latest`
+  - specific `rev`: `entries`
+- `POST /v1/batchGet` reads from `entries_latest`.
+- `GET /v1/entries/{id}/versions` reads from `entries`.
