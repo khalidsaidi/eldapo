@@ -2,6 +2,12 @@
 
 LDAP-inspired capability directory API for agents (MCP/RAG/skills), built with Next.js Route Handlers + Postgres.
 
+Benchmark report: [docs/benchmarks.md](docs/benchmarks.md).
+
+Scoped speed statement:
+- On the benchmark machine in `docs/benchmarks.md`, `eldapo-core` is up to ~12x faster than SQL baseline for structured filters at 10k/100k.
+- At 1M scale, current core behavior regresses on some high-density equality filters, so core is not universally faster yet.
+
 ## Features
 
 - Immutable, revisioned entries (`id`, `rev`)
@@ -179,6 +185,9 @@ With this flag, `/v1/search`, latest `/v1/entries/{id}`, and `/v1/batchGet` forw
 
 ## Benchmarks
 
+Full published results and methodology:
+- [docs/benchmarks.md](docs/benchmarks.md)
+
 Generate synthetic datasets:
 
 ```bash
@@ -195,6 +204,12 @@ Run latency/QPS comparison (SQL + core):
 
 ```bash
 pnpm bench:run
+```
+
+Render aggregated markdown from raw runs:
+
+```bash
+pnpm bench:report
 ```
 
 Benchmark JSON output is written to `.ai/bench/` (untracked).
@@ -234,3 +249,4 @@ Set env vars:
 - `pnpm bench:generate`
 - `pnpm bench:load --file=...`
 - `pnpm bench:run`
+- `pnpm bench:report`

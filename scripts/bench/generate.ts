@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 type BenchEntry = {
@@ -27,14 +28,20 @@ async function main(): Promise<void> {
     const outputPath = resolve(outputDir, `dataset-${size}.jsonl`);
     await mkdir(dirname(outputPath), { recursive: true });
 
-    const lines: string[] = [];
+    const stream = createWriteStream(outputPath, { encoding: 'utf8' });
 
     for (let index = 0; index < size; index += 1) {
       const entry = generateEntry(index);
-      lines.push(JSON.stringify(entry));
+      if (!stream.write(`${JSON.stringify(entry)}\n`)) {
+        await onceDrain(stream);
+      }
     }
 
-    await writeFile(outputPath, `${lines.join('\n')}\n`, 'utf8');
+    await new Promise<void>((resolvePromise, reject) => {
+      stream.on('error', reject);
+      stream.end(() => resolvePromise());
+    });
+
     console.log(`generated ${size} entries -> ${outputPath}`);
   }
 }
@@ -120,6 +127,12 @@ function parseArgs(argv: string[]): { sizes?: number[]; outDir?: string } {
   }
 
   return parsed;
+}
+
+async function onceDrain(stream: ReturnType<typeof createWriteStream>): Promise<void> {
+  await new Promise<void>((resolvePromise) => {
+    stream.once('drain', () => resolvePromise());
+  });
 }
 
 void main().catch((error) => {

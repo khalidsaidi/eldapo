@@ -16,7 +16,8 @@
     "db:explain": "tsx scripts/db/explain.ts",
     "bench:generate": "tsx scripts/bench/generate.ts",
     "bench:load": "tsx scripts/bench/load.ts",
-    "bench:run": "tsx scripts/bench/run.ts"
+    "bench:run": "tsx scripts/bench/run.ts",
+    "bench:report": "tsx scripts/bench/report.ts"
   },
   "dependencies": {
     "dotenv": "^17.3.1",

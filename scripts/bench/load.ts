@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs';
 import { resolve } from 'node:path';
 import readline from 'node:readline';
 
-import postgres from 'postgres';
+import postgres, { type Sql } from 'postgres';
 
 type BenchEntry = {
   id: string;
@@ -28,11 +28,12 @@ if (!databaseUrl) {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (!args.file) {
-    throw new Error('Usage: pnpm bench:load --file=.ai/bench/dataset-10000.jsonl [--truncate]');
+    throw new Error('Usage: pnpm bench:load --file=.ai/bench/dataset-10000.jsonl [--truncate] [--batch-size=500]');
   }
 
   const sql = postgres(databaseUrl, { max: 1 });
   const inputPath = resolve(args.file);
+  const batchSize = args.batchSize;
 
   try {
     if (args.truncate) {
@@ -43,6 +44,7 @@ async function main(): Promise<void> {
     }
 
     let count = 0;
+    let pending: BenchEntry[] = [];
     const stream = createReadStream(inputPath, { encoding: 'utf8' });
     const lineReader = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
@@ -53,101 +55,24 @@ async function main(): Promise<void> {
       }
 
       const entry = JSON.parse(trimmed) as BenchEntry;
+      pending.push(entry);
 
-      await sql.begin(async (tx) => {
-        await tx.unsafe(
-          `
-            INSERT INTO entries (
-              id,
-              rev,
-              type,
-              namespace,
-              name,
-              description,
-              version,
-              attrs,
-              manifest,
-              meta
-            )
-            VALUES (
-              $1,
-              $2,
-              $3,
-              $4,
-              $5,
-              $6,
-              $7,
-              $8::jsonb,
-              $9::jsonb,
-              $10::jsonb
-            )
-            ON CONFLICT (id, rev) DO NOTHING
-          `,
-          [
-            entry.id,
-            entry.rev,
-            entry.type,
-            entry.namespace,
-            entry.name,
-            entry.description,
-            entry.version,
-            entry.attrs,
-            entry.manifest,
-            entry.meta,
-          ] as never[],
-        );
+      if (pending.length >= batchSize) {
+        await flushBatch(sql, pending);
+        count += pending.length;
+        pending = [];
 
-        await tx.unsafe(
-          `
-            INSERT INTO entries_latest (
-              id,
-              rev,
-              type,
-              namespace,
-              name,
-              description,
-              version,
-              attrs,
-              manifest,
-              meta,
-              created_at,
-              updated_at
-            )
-            SELECT
-              id,
-              rev,
-              type,
-              namespace,
-              name,
-              description,
-              version,
-              attrs,
-              manifest,
-              meta,
-              created_at,
-              updated_at
-            FROM entries
-            WHERE id = $1 AND rev = $2
-            ON CONFLICT (id) DO UPDATE
-            SET
-              rev = EXCLUDED.rev,
-              type = EXCLUDED.type,
-              namespace = EXCLUDED.namespace,
-              name = EXCLUDED.name,
-              description = EXCLUDED.description,
-              version = EXCLUDED.version,
-              attrs = EXCLUDED.attrs,
-              manifest = EXCLUDED.manifest,
-              meta = EXCLUDED.meta,
-              created_at = EXCLUDED.created_at,
-              updated_at = EXCLUDED.updated_at
-            WHERE entries_latest.rev <= EXCLUDED.rev
-          `,
-          [entry.id, entry.rev],
-        );
-      });
+        if (count % 10_000 === 0) {
+          console.log(`loaded ${count} rows...`);
+        }
+      }
+    }
 
-      count += 1;
+    if (pending.length > 0) {
+      await flushBatch(sql, pending);
+      count += pending.length;
+      pending = [];
+
       if (count % 10_000 === 0) {
         console.log(`loaded ${count} rows...`);
       }
@@ -159,10 +84,108 @@ async function main(): Promise<void> {
   }
 }
 
-function parseArgs(argv: string[]): { file?: string; truncate: boolean } {
+async function flushBatch(sql: Sql, batch: BenchEntry[]): Promise<void> {
+  await sql.begin(async (tx) => {
+    for (const entry of batch) {
+      await tx.unsafe(
+        `
+          INSERT INTO entries (
+            id,
+            rev,
+            type,
+            namespace,
+            name,
+            description,
+            version,
+            attrs,
+            manifest,
+            meta
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8::jsonb,
+            $9::jsonb,
+            $10::jsonb
+          )
+          ON CONFLICT (id, rev) DO NOTHING
+        `,
+        [
+          entry.id,
+          entry.rev,
+          entry.type,
+          entry.namespace,
+          entry.name,
+          entry.description,
+          entry.version,
+          entry.attrs,
+          entry.manifest,
+          entry.meta,
+        ] as never[],
+      );
+
+      await tx.unsafe(
+        `
+          INSERT INTO entries_latest (
+            id,
+            rev,
+            type,
+            namespace,
+            name,
+            description,
+            version,
+            attrs,
+            manifest,
+            meta,
+            created_at,
+            updated_at
+          )
+          SELECT
+            id,
+            rev,
+            type,
+            namespace,
+            name,
+            description,
+            version,
+            attrs,
+            manifest,
+            meta,
+            created_at,
+            updated_at
+          FROM entries
+          WHERE id = $1 AND rev = $2
+          ON CONFLICT (id) DO UPDATE
+          SET
+            rev = EXCLUDED.rev,
+            type = EXCLUDED.type,
+            namespace = EXCLUDED.namespace,
+            name = EXCLUDED.name,
+            description = EXCLUDED.description,
+            version = EXCLUDED.version,
+            attrs = EXCLUDED.attrs,
+            manifest = EXCLUDED.manifest,
+            meta = EXCLUDED.meta,
+            created_at = EXCLUDED.created_at,
+            updated_at = EXCLUDED.updated_at
+          WHERE entries_latest.rev <= EXCLUDED.rev
+        `,
+        [entry.id, entry.rev],
+      );
+    }
+  });
+}
+
+function parseArgs(argv: string[]): { file?: string; truncate: boolean; batchSize: number } {
   const output = {
     truncate: false,
-  } as { file?: string; truncate: boolean };
+    batchSize: 500,
+  } as { file?: string; truncate: boolean; batchSize: number };
 
   for (const arg of argv) {
     if (arg === '--truncate') {
@@ -172,6 +195,14 @@ function parseArgs(argv: string[]): { file?: string; truncate: boolean } {
 
     if (arg.startsWith('--file=')) {
       output.file = arg.slice('--file='.length);
+      continue;
+    }
+
+    if (arg.startsWith('--batch-size=')) {
+      const value = Number(arg.slice('--batch-size='.length));
+      if (Number.isInteger(value) && value > 0) {
+        output.batchSize = value;
+      }
     }
   }
 
