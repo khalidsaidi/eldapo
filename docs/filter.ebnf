@@ -1,0 +1,21 @@
+filter         ::= wsp* "(" wsp* filterBody wsp* ")" wsp* ;
+filterBody     ::= and | or | not | item ;
+
+and            ::= "&" wsp* filter wsp* { filter wsp* } ;
+or             ::= "|" wsp* filter wsp* { filter wsp* } ;
+not            ::= "!" wsp* filter ;
+
+item           ::= key wsp* "=" wsp* ( presence | value ) ;
+presence       ::= "*" ;   (* field presence test: (field=*) *)
+
+key            ::= keyChar { keyChar } ;
+keyChar        ::= ALPHA | DIGIT | "_" | "-" | "." | ":" | "/" ;
+
+value          ::= { valueChar } ;
+valueChar      ::= escaped | unescaped ;
+escaped        ::= "\\" ( "\\" | "*" | "(" | ")" ) ;
+unescaped      ::= ? any Unicode char except "\\" "(" ")" ? ;
+
+wsp            ::= " " | "\t" | "\n" | "\r" ;
+ALPHA          ::= "A"…"Z" | "a"…"z" ;
+DIGIT          ::= "0"…"9" ;
