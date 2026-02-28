@@ -63,8 +63,8 @@ const searchQuerySchema = z.object({
   q: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(20),
   cursor: z.string().optional(),
-  sort: z.enum(['updated_at_desc']).default('updated_at_desc'),
-  view: z.enum(['card', 'full']).default('card'),
+  sort: z.enum(['updated_at_desc', 'none']).default('updated_at_desc'),
+  view: z.enum(['card', 'full', 'ids']).default('card'),
 });
 
 const entryQuerySchema = z.object({
@@ -263,6 +263,10 @@ async function handleRequest(
       const ast = parsedQuery.filter ? filterCache.getOrParse(parsedQuery.filter) : null;
       let cursor = null;
       if (parsedQuery.cursor) {
+        if (parsedQuery.sort !== 'updated_at_desc') {
+          throw new AppError('invalid_request', 'Cursor requires sort=updated_at_desc.');
+        }
+
         try {
           cursor = decodeCursor(parsedQuery.cursor);
         } catch {
@@ -277,9 +281,18 @@ async function handleRequest(
           limit: parsedQuery.limit,
           cursor,
           q: parsedQuery.q,
+          sort: parsedQuery.sort,
         },
         requester,
       );
+
+      if (parsedQuery.view === 'ids') {
+        sendJson(res, 200, {
+          ids: searchResult.items.map((item) => item.entry.id),
+          next_cursor: searchResult.next_cursor,
+        });
+        return;
+      }
 
       sendJson(res, 200, {
         items: searchResult.items.map((item) =>

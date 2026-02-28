@@ -31,8 +31,8 @@ const searchQuerySchema = z.object({
   q: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(20),
   cursor: z.string().optional(),
-  sort: z.enum(['updated_at_desc']).default('updated_at_desc'),
-  view: z.enum(['card', 'full']).default('card'),
+  sort: z.enum(['updated_at_desc', 'none']).default('updated_at_desc'),
+  view: z.enum(['card', 'full', 'ids']).default('card'),
 });
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -68,6 +68,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     let scanCursor: SearchCursor | null = null;
     if (parsedQuery.cursor) {
+      if (parsedQuery.sort !== 'updated_at_desc') {
+        throw new AppError('invalid_request', 'Cursor requires sort=updated_at_desc.');
+      }
+
       try {
         scanCursor = decodeCursor(parsedQuery.cursor);
       } catch {
@@ -76,6 +80,70 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
 
     const requester = parseRequester(request);
+
+    if (parsedQuery.sort === 'none') {
+      const whereClauses: string[] = [baseFilterSql];
+      const params: Array<string | number> = [...baseFilterParams];
+
+      if (parsedQuery.q) {
+        params.push(`%${parsedQuery.q}%`);
+        const patternRef = `$${params.length}`;
+        whereClauses.push(`(name ILIKE ${patternRef} OR description ILIKE ${patternRef})`);
+      }
+
+      const fetchWindow = Math.min(Math.max(parsedQuery.limit * 5, 50), 2000);
+      params.push(fetchWindow);
+      const limitRef = `$${params.length}`;
+
+      const sqlText = `
+        SELECT
+          id,
+          rev,
+          type,
+          namespace,
+          name,
+          description,
+          version,
+          attrs,
+          manifest,
+          meta,
+          created_at,
+          updated_at
+        FROM entries_latest
+        WHERE ${whereClauses.join(' AND ')}
+        LIMIT ${limitRef}
+      `;
+
+      const rows = (await getDb().unsafe(sqlText, params)) as Row[];
+      const visibleRows: Row[] = [];
+
+      for (const row of rows) {
+        const normalized = normalizeEntryRow(row);
+        if (!canSee(normalized, requester)) {
+          continue;
+        }
+
+        visibleRows.push(row);
+        if (visibleRows.length >= parsedQuery.limit) {
+          break;
+        }
+      }
+
+      if (parsedQuery.view === 'ids') {
+        return NextResponse.json({
+          ids: visibleRows.map((row) => normalizeEntryRow(row).id),
+          next_cursor: null,
+        });
+      }
+
+      const items = visibleRows.map((row) => {
+        const normalized = normalizeEntryRow(row);
+        return parsedQuery.view === 'full' ? toFull(normalized) : toCard(normalized);
+      });
+
+      return NextResponse.json({ items, next_cursor: null });
+    }
+
     const fetchWindow = Math.min(Math.max(parsedQuery.limit * 2, 20), 400);
 
     const visibleRows: Row[] = [];
@@ -154,6 +222,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       if (rows.length < fetchWindow) {
         break;
       }
+    }
+
+    if (parsedQuery.view === 'ids') {
+      return NextResponse.json({
+        ids: visibleRows.map((row) => normalizeEntryRow(row).id),
+        next_cursor: nextCursor,
+      });
     }
 
     const items = visibleRows.map((row) => {

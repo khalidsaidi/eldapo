@@ -52,6 +52,10 @@ Optional core daemon routes (additive, internal acceleration):
 Default views:
 - `search`: `card` unless `view=full`
 - `get`: `full` unless `view=card`
+- `search` also supports race/fair mode:
+  - `view=ids` returns only entry IDs (`{ ids, next_cursor }`)
+  - `sort=none` disables updated-time ordering for unordered comparison runs
+  - `cursor` is only valid with `sort=updated_at_desc`
 
 ## Filter Rules
 
