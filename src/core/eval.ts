@@ -11,78 +11,125 @@ type EvalContext = {
   universe: RoaringBitmap32;
 };
 
+type EvalResult = {
+  bitmap: RoaringBitmap32;
+  owned: boolean;
+};
+
 export function evaluateFilterAst(ast: FilterNode, context: EvalContext): RoaringBitmap32 {
-  return evalNode(ast, context);
+  const result = evalNode(ast, context);
+
+  if (result.owned) {
+    return result.bitmap;
+  }
+
+  return result.bitmap.clone();
 }
 
-function evalNode(ast: FilterNode, context: EvalContext): RoaringBitmap32 {
+function evalNode(ast: FilterNode, context: EvalContext): EvalResult {
   switch (ast.kind) {
     case 'eq': {
       const resolved = resolveCoreKey(ast.key);
       const token = eqToken(resolved.scope, resolved.key, ast.value);
-      return cloneOrEmpty(context.getPosting(token));
+      return borrowPosting(context.getPosting(token));
     }
 
     case 'present': {
       const resolved = resolveCoreKey(ast.key);
       const token = presentToken(resolved.scope, resolved.key);
-      return cloneOrEmpty(context.getPosting(token));
+      return borrowPosting(context.getPosting(token));
     }
 
     case 'and': {
       if (ast.children.length === 0) {
-        return new RoaringBitmap32();
+        return {
+          bitmap: new RoaringBitmap32(),
+          owned: true,
+        };
       }
 
       const sortedChildren = [...ast.children].sort((left, right) => {
         return estimateCardinality(left, context) - estimateCardinality(right, context);
       });
 
-      let result: RoaringBitmap32 | null = null;
+      let accumulator: EvalResult | null = null;
 
       for (const child of sortedChildren) {
-        const childBitmap = evalNode(child, context);
+        const childResult = evalNode(child, context);
 
-        if (result === null) {
-          result = childBitmap;
-          if (result.isEmpty) {
+        if (!accumulator) {
+          if (childResult.owned) {
+            accumulator = childResult;
+          } else {
+            accumulator = {
+              bitmap: childResult.bitmap.clone(),
+              owned: true,
+            };
+          }
+
+          if (accumulator.bitmap.isEmpty) {
             break;
           }
+
           continue;
         }
 
-        result.andInPlace(childBitmap);
-        childBitmap.dispose();
+        accumulator.bitmap.andInPlace(childResult.bitmap);
 
-        if (result.isEmpty) {
+        if (childResult.owned) {
+          childResult.bitmap.dispose();
+        }
+
+        if (accumulator.bitmap.isEmpty) {
           break;
         }
       }
 
-      return result ?? new RoaringBitmap32();
+      return (
+        accumulator ?? {
+          bitmap: new RoaringBitmap32(),
+          owned: true,
+        }
+      );
     }
 
     case 'or': {
       if (ast.children.length === 0) {
-        return new RoaringBitmap32();
+        return {
+          bitmap: new RoaringBitmap32(),
+          owned: true,
+        };
       }
 
-      const result = new RoaringBitmap32();
+      const accumulator = new RoaringBitmap32();
       for (const child of ast.children) {
-        const childBitmap = evalNode(child, context);
-        result.orInPlace(childBitmap);
-        childBitmap.dispose();
+        const childResult = evalNode(child, context);
+        accumulator.orInPlace(childResult.bitmap);
+
+        if (childResult.owned) {
+          childResult.bitmap.dispose();
+        }
       }
 
-      return result;
+      return {
+        bitmap: accumulator,
+        owned: true,
+      };
     }
 
     case 'not': {
-      const result = context.universe.clone();
-      const child = evalNode(ast.child, context);
-      result.andNotInPlace(child);
-      child.dispose();
-      return result;
+      const childResult = evalNode(ast.child, context);
+      const accumulator = context.universe.clone();
+      accumulator.andNotInPlace(childResult.bitmap);
+
+      if (childResult.owned) {
+        childResult.bitmap.dispose();
+      }
+
+      return {
+        bitmap: accumulator,
+        owned: true,
+      };
     }
 
     default: {
@@ -90,6 +137,20 @@ function evalNode(ast: FilterNode, context: EvalContext): RoaringBitmap32 {
       throw new Error(`Unsupported filter node: ${(impossible as { kind: string }).kind}`);
     }
   }
+}
+
+function borrowPosting(posting: RoaringBitmap32 | null): EvalResult {
+  if (!posting) {
+    return {
+      bitmap: new RoaringBitmap32(),
+      owned: true,
+    };
+  }
+
+  return {
+    bitmap: posting,
+    owned: false,
+  };
 }
 
 function estimateCardinality(ast: FilterNode, context: EvalContext): number {
@@ -128,8 +189,4 @@ function estimateCardinality(ast: FilterNode, context: EvalContext): number {
       throw new Error(`Unsupported filter node: ${(impossible as { kind: string }).kind}`);
     }
   }
-}
-
-function cloneOrEmpty(bitmap: RoaringBitmap32 | null): RoaringBitmap32 {
-  return bitmap ? bitmap.clone() : new RoaringBitmap32();
 }

@@ -9,10 +9,10 @@ import { canSee, parseRequester } from '@/lib/access';
 import { getDb } from '@/lib/db';
 import { decodeCursor, normalizeAttrs, normalizeEntryRow } from '@/lib/entries';
 import { AppError } from '@/lib/errors';
-import { parseFilter } from '@/lib/filter/parser';
 import { toFull } from '@/lib/view';
 
 import { InMemoryCoreIndex } from '@/core/index';
+import { FilterAstCache } from '@/daemon/filterCache';
 
 type EntryRow = {
   id: string;
@@ -87,6 +87,7 @@ const pollMs = Number(process.env.ELDAPPO_CORE_POLL_MS ?? 500);
 const pollBatch = Number(process.env.ELDAPPO_CORE_POLL_BATCH ?? 500);
 
 const core = new InMemoryCoreIndex();
+const filterCache = new FilterAstCache(Number(process.env.ELDAPPO_FILTER_CACHE_SIZE ?? 256));
 let lastSeq = 0;
 let pollInFlight = false;
 
@@ -259,7 +260,7 @@ async function handleRequest(
         view: emptyToUndefined(url.searchParams.get('view')),
       });
 
-      const ast = parsedQuery.filter ? parseFilter(parsedQuery.filter) : null;
+      const ast = parsedQuery.filter ? filterCache.getOrParse(parsedQuery.filter) : null;
       let cursor = null;
       if (parsedQuery.cursor) {
         try {

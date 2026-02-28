@@ -12,8 +12,11 @@ import { evaluateFilterAst } from './eval';
 import { compareSortKeys, eqToken, isAfterCursor, presentToken } from './keys';
 
 const TOP_LEVEL_INDEX_FIELDS = ['id', 'type', 'name', 'namespace', 'version', 'rev'] as const;
+const SELECTIVE_RETRIEVAL_THRESHOLD = 5_000;
+const SELECTIVE_RETRIEVAL_MAX_UNIVERSE_FRACTION = 0.01;
 
 type TopLevelIndexField = (typeof TOP_LEVEL_INDEX_FIELDS)[number];
+type Visibility = 'public' | 'internal' | 'restricted';
 
 type TokenBag = {
   eqTokens: Set<string>;
@@ -73,8 +76,13 @@ export class InMemoryCoreIndex implements CoreIndex {
   private docs = new Map<number, IndexedDoc>();
   private tokenToPosting = new Map<string, RoaringBitmap32>();
   private presenceToPosting = new Map<string, RoaringBitmap32>();
+  private visibilityPublic = new RoaringBitmap32();
+  private visibilityInternal = new RoaringBitmap32();
+  private visibilityRestricted = new RoaringBitmap32();
+  private groupToPosting = new Map<string, RoaringBitmap32>();
   private universe = new RoaringBitmap32();
   private updatedOrder: number[] = [];
+  private docSortRank = new Map<number, number>();
   private buildMs = 0;
 
   buildFromSnapshot(rows: EntryRecord[]): void {
@@ -110,52 +118,74 @@ export class InMemoryCoreIndex implements CoreIndex {
     const limit = Math.min(Math.max(options.limit, 1), 200);
     const q = options.q?.trim().toLowerCase();
     const hasQ = Boolean(q);
+    const allowed = this.getAllowedDocs(requester);
+    if (allowed.isEmpty) {
+      allowed.dispose();
+      return {
+        items: [],
+        next_cursor: null,
+      };
+    }
 
-    const candidates = filterAst
-      ? evaluateFilterAst(filterAst, {
-          getPosting: (token) => this.getPosting(token),
-          universe: this.universe,
-        })
-      : this.universe.clone();
+    if (!filterAst) {
+      try {
+        const items: CoreSearchHit[] = [];
+        const nextCursor = this.collectScanAllowedResults(
+          allowed,
+          options,
+          hasQ ? (q as string) : null,
+          limit,
+          items,
+        );
+
+        return {
+          items,
+          next_cursor: nextCursor,
+        };
+      } finally {
+        allowed.dispose();
+      }
+    }
+
+    const candidates = evaluateFilterAst(filterAst, {
+      getPosting: (token) => this.getPosting(token),
+      universe: this.universe,
+    });
+
+    if (candidates.isEmpty) {
+      candidates.dispose();
+      allowed.dispose();
+      return {
+        items: [],
+        next_cursor: null,
+      };
+    }
+
+    candidates.andInPlace(allowed);
+    allowed.dispose();
+
+    if (candidates.isEmpty) {
+      candidates.dispose();
+      return {
+        items: [],
+        next_cursor: null,
+      };
+    }
 
     try {
       const items: CoreSearchHit[] = [];
       let nextCursor: string | null = null;
 
-      for (const docId of this.updatedOrder) {
-        if (!candidates.has(docId)) {
-          continue;
-        }
+      const selectiveByThreshold = candidates.size <= SELECTIVE_RETRIEVAL_THRESHOLD;
+      const selectiveByRatio =
+        this.universe.size > 0 &&
+        candidates.size <= Math.floor(this.universe.size * SELECTIVE_RETRIEVAL_MAX_UNIVERSE_FRACTION);
+      const isSelectiveEnough = selectiveByThreshold || selectiveByRatio;
 
-        const indexed = this.docs.get(docId);
-        if (!indexed) {
-          continue;
-        }
-
-        if (options.cursor && !isAfterCursor(indexed.entry.updated_at, indexed.entry.id, options.cursor)) {
-          continue;
-        }
-
-        if (hasQ && !matchesQuery(indexed, q as string)) {
-          continue;
-        }
-
-        if (!canSee(indexed.entry, requester)) {
-          continue;
-        }
-
-        items.push({
-          entry: indexed.entry,
-          card: indexed.card,
-        });
-
-        if (items.length >= limit) {
-          nextCursor = encodeCursor({
-            updated_at: indexed.entry.updated_at,
-            id: indexed.entry.id,
-          });
-          break;
-        }
+      if (isSelectiveEnough) {
+        nextCursor = this.collectSelectiveResults(candidates, options, hasQ ? (q as string) : null, limit, items);
+      } else {
+        nextCursor = this.collectScanResults(candidates, options, hasQ ? (q as string) : null, limit, items);
       }
 
       return {
@@ -285,6 +315,7 @@ export class InMemoryCoreIndex implements CoreIndex {
     }
 
     this.universe.add(indexed.docId);
+    this.addVisibilityPosting(indexed);
     this.updatedOrder.push(indexed.docId);
   }
 
@@ -300,6 +331,7 @@ export class InMemoryCoreIndex implements CoreIndex {
     }
 
     this.universe.delete(indexed.docId);
+    this.removeVisibilityPosting(indexed);
     this.updatedOrder = this.updatedOrder.filter((docId) => docId !== indexed.docId);
   }
 
@@ -343,6 +375,11 @@ export class InMemoryCoreIndex implements CoreIndex {
         right.entry.id,
       );
     });
+
+    this.docSortRank.clear();
+    for (let index = 0; index < this.updatedOrder.length; index += 1) {
+      this.docSortRank.set(this.updatedOrder[index], index);
+    }
   }
 
   private getPosting(token: string): RoaringBitmap32 | null {
@@ -351,6 +388,221 @@ export class InMemoryCoreIndex implements CoreIndex {
     }
 
     return this.tokenToPosting.get(token) ?? null;
+  }
+
+  private getAllowedDocs(requester: Requester): RoaringBitmap32 {
+    const allowed = this.visibilityPublic.clone();
+
+    if (!requester.isAuthenticated) {
+      return allowed;
+    }
+
+    allowed.orInPlace(this.visibilityInternal);
+
+    if (requester.groups.size === 0) {
+      return allowed;
+    }
+
+    for (const group of requester.groups) {
+      const posting = this.groupToPosting.get(group);
+      if (!posting) {
+        continue;
+      }
+
+      allowed.orInPlace(posting);
+    }
+
+    return allowed;
+  }
+
+  private collectScanResults(
+    candidates: RoaringBitmap32,
+    options: CoreSearchOptions,
+    q: string | null,
+    limit: number,
+    items: CoreSearchHit[],
+  ): string | null {
+    for (const docId of this.updatedOrder) {
+      if (!candidates.has(docId)) {
+        continue;
+      }
+
+      const indexed = this.docs.get(docId);
+      if (!indexed) {
+        continue;
+      }
+
+      if (options.cursor && !isAfterCursor(indexed.entry.updated_at, indexed.entry.id, options.cursor)) {
+        continue;
+      }
+
+      if (q && !matchesQuery(indexed, q)) {
+        continue;
+      }
+
+      items.push({
+        entry: indexed.entry,
+        card: indexed.card,
+      });
+
+      if (items.length >= limit) {
+        return encodeCursor({
+          updated_at: indexed.entry.updated_at,
+          id: indexed.entry.id,
+        });
+      }
+    }
+
+    return null;
+  }
+
+  private collectScanAllowedResults(
+    allowed: RoaringBitmap32,
+    options: CoreSearchOptions,
+    q: string | null,
+    limit: number,
+    items: CoreSearchHit[],
+  ): string | null {
+    for (const docId of this.updatedOrder) {
+      if (!allowed.has(docId)) {
+        continue;
+      }
+
+      const indexed = this.docs.get(docId);
+      if (!indexed) {
+        continue;
+      }
+
+      if (options.cursor && !isAfterCursor(indexed.entry.updated_at, indexed.entry.id, options.cursor)) {
+        continue;
+      }
+
+      if (q && !matchesQuery(indexed, q)) {
+        continue;
+      }
+
+      items.push({
+        entry: indexed.entry,
+        card: indexed.card,
+      });
+
+      if (items.length >= limit) {
+        return encodeCursor({
+          updated_at: indexed.entry.updated_at,
+          id: indexed.entry.id,
+        });
+      }
+    }
+
+    return null;
+  }
+
+  private collectSelectiveResults(
+    candidates: RoaringBitmap32,
+    options: CoreSearchOptions,
+    q: string | null,
+    limit: number,
+    items: CoreSearchHit[],
+  ): string | null {
+    const topDocs: IndexedDoc[] = [];
+
+    for (const docId of candidates) {
+      const indexed = this.docs.get(docId);
+      if (!indexed) {
+        continue;
+      }
+
+      if (options.cursor && !isAfterCursor(indexed.entry.updated_at, indexed.entry.id, options.cursor)) {
+        continue;
+      }
+
+      if (q && !matchesQuery(indexed, q)) {
+        continue;
+      }
+
+      this.insertTopDoc(topDocs, indexed, limit);
+    }
+
+    for (const indexed of topDocs) {
+      items.push({
+        entry: indexed.entry,
+        card: indexed.card,
+      });
+
+      if (items.length >= limit) {
+        return encodeCursor({
+          updated_at: indexed.entry.updated_at,
+          id: indexed.entry.id,
+        });
+      }
+    }
+
+    return null;
+  }
+
+  private insertTopDoc(topDocs: IndexedDoc[], candidate: IndexedDoc, limit: number): void {
+    const candidateRank = this.docSortRank.get(candidate.docId);
+    if (candidateRank === undefined) {
+      return;
+    }
+
+    let insertAt = topDocs.length;
+
+    while (insertAt > 0) {
+      const previous = topDocs[insertAt - 1];
+      const previousRank = this.docSortRank.get(previous.docId);
+      if (previousRank === undefined || candidateRank >= previousRank) {
+        break;
+      }
+
+      insertAt -= 1;
+    }
+
+    topDocs.splice(insertAt, 0, candidate);
+
+    if (topDocs.length > limit) {
+      topDocs.pop();
+    }
+  }
+
+  private addVisibilityPosting(indexed: IndexedDoc): void {
+    const visibility = readVisibility(indexed.entry.attrs);
+
+    if (visibility === 'public') {
+      this.visibilityPublic.add(indexed.docId);
+      return;
+    }
+
+    if (visibility === 'internal') {
+      this.visibilityInternal.add(indexed.docId);
+      return;
+    }
+
+    this.visibilityRestricted.add(indexed.docId);
+
+    for (const group of indexed.entry.attrs.allowed_group ?? []) {
+      this.addPosting(this.groupToPosting, group, indexed.docId);
+    }
+  }
+
+  private removeVisibilityPosting(indexed: IndexedDoc): void {
+    const visibility = readVisibility(indexed.entry.attrs);
+
+    if (visibility === 'public') {
+      this.visibilityPublic.delete(indexed.docId);
+      return;
+    }
+
+    if (visibility === 'internal') {
+      this.visibilityInternal.delete(indexed.docId);
+      return;
+    }
+
+    this.visibilityRestricted.delete(indexed.docId);
+
+    for (const group of indexed.entry.attrs.allowed_group ?? []) {
+      this.removePosting(this.groupToPosting, group, indexed.docId);
+    }
   }
 
   private reset(): void {
@@ -362,15 +614,29 @@ export class InMemoryCoreIndex implements CoreIndex {
       posting.dispose();
     }
 
+    for (const posting of this.groupToPosting.values()) {
+      posting.dispose();
+    }
+
     this.tokenToPosting.clear();
     this.presenceToPosting.clear();
+    this.groupToPosting.clear();
     this.idToDoc.clear();
     this.docs.clear();
     this.updatedOrder = [];
+    this.docSortRank.clear();
     this.nextDocId = 1;
+
+    this.visibilityPublic.dispose();
+    this.visibilityPublic = new RoaringBitmap32();
+    this.visibilityInternal.dispose();
+    this.visibilityInternal = new RoaringBitmap32();
+    this.visibilityRestricted.dispose();
+    this.visibilityRestricted = new RoaringBitmap32();
 
     this.universe.dispose();
     this.universe = new RoaringBitmap32();
+    this.buildMs = 0;
   }
 }
 
@@ -431,4 +697,14 @@ function addTopLevelTokens(entry: EntryRecord, eqTokens: Set<string>, presenceTo
       presenceTokens.add(presentToken('top', key));
     }
   }
+}
+
+function readVisibility(attrs: EntryRecord['attrs']): Visibility {
+  const value = attrs.visibility?.[0];
+
+  if (value === 'internal' || value === 'restricted') {
+    return value;
+  }
+
+  return 'public';
 }
