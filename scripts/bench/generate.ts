@@ -1,8 +1,9 @@
 import { createWriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-type BenchEntry = {
+export type BenchEntry = {
   id: string;
   rev: number;
   type: 'skill' | 'rag' | 'mcp';
@@ -46,13 +47,14 @@ async function main(): Promise<void> {
   }
 }
 
-function generateEntry(index: number): BenchEntry {
+export function generateEntry(index: number): BenchEntry {
   const type: BenchEntry['type'] = pickType(index);
   const id = `${type}:bench:${String(index).padStart(9, '0')}`;
 
   const capability =
     type === 'rag' ? pickOne(index, ['retrieve', 'embed', 'rerank']) : pickOne(index, ['summarize', 'extract', 'classify']);
-  const tag = pickOne(index * 3, ['finance', 'pdf', 'docs', 'search', 'code', 'support']);
+  // Use a coprime step so all tags cycle evenly (gcd(5, 6) = 1).
+  const tag = pickOne(index * 5, ['finance', 'pdf', 'docs', 'search', 'code', 'support']);
   const env = pickOne(index * 7, ['prod', 'staging', 'dev']);
   const visibility = index % 20 === 0 ? 'restricted' : index % 8 === 0 ? 'internal' : 'public';
 
@@ -135,7 +137,13 @@ async function onceDrain(stream: ReturnType<typeof createWriteStream>): Promise<
   });
 }
 
-void main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+const isMain = process.argv[1]
+  ? resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))
+  : false;
+
+if (isMain) {
+  void main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
