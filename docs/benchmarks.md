@@ -1,117 +1,153 @@
 # eldapo Benchmarks
 
-## Run Metadata
+## Official SQL vs Core Report (2026-02-28)
 
-- Date window: 2026-02-27T05:51:31Z to 2026-02-27T07:08:08Z
-- Code base used during run: `9b0e81aa90490f8a88c3f95cfab386cb4dfd392b` plus the benchmark harness updates committed alongside this report
-- Machine:
-  - OS: Ubuntu on WSL2 (`Linux 6.6.87.2-microsoft-standard-WSL2`)
-  - CPU: 13th Gen Intel(R) Core(TM) i9-13900H (8 vCPU visible)
-  - RAM: 23 GiB
-- Runtime:
-  - Node.js `v20.19.0`
-  - pnpm `9.15.1`
-  - Postgres `16.11` (Docker, `postgres:16`)
+### Run Metadata
 
-## Methodology
+- Window: `2026-02-27T21:40:29.961Z` to `2026-02-28T02:16:00.927Z`
+- Scenario label: `official-sql-core-fixed`
+- Commit SHA: `61c1af6666aa93ae88f4ff1ac0087e0255b016b1`
+- OS: `Linux 6.6.87.2-microsoft-standard-WSL2 x86_64 GNU/Linux`
+- CPU: `AMD Ryzen 7 3800X 8-Core Processor` (16 vCPUs exposed)
+- RAM: `16337080 kB` (`15.58 GiB`)
+- Node.js: `v20.20.0`
+- pnpm: `9.15.3`
+- Postgres baseline: `postgres:16` via Docker
 
-- Build mode: production (`pnpm build`, `pnpm start`), not `next dev`.
-- Targets:
-  - SQL baseline: `GET /v1/search` with `ELDAPPO_USE_CORE=false`
-  - Core direct: `GET /core/search`
-  - Forwarded (optional): `GET /v1/search` with `ELDAPPO_USE_CORE=true`
-- Suites (same as `scripts/bench/run.ts`):
-  - `(&(type=skill)(capability=summarize)(env=prod))`
-  - `(&(type=rag)(capability=retrieve)(tag=finance)(status=active))`
-  - `(tag=pdf)`
-  - `(endpoint=*)`
-- Load profile:
-  - 5 runs per suite-target
-  - first run discarded as warmup
-  - report value = median of runs 2-5
-  - `--duration=20` and `--connections=50`
-- Datasets:
-  - 10k: SQL vs core
-  - 100k: SQL vs core + forwarded `/v1`
-  - 1M: SQL vs core
+### Methodology
 
-## Core Index Stats
+- Dataset generator: `scripts/bench/generate.ts`
+- Dataset sizes: `10,000`, `100,000`, `1,000,000`
+- Deterministic generator fix: tag selection uses `pickOne(index * 5, tags)` so all six tags are represented (`gcd(5, 6) = 1`)
+- Per dataset:
+  1. `pnpm bench:load --file=.ai/bench/dataset-<size>.jsonl --truncate`
+  2. Start `eldapo-core` against the same Postgres and wait for `/core/health`
+  3. Capture core stats: `curl http://127.0.0.1:4100/core/stats > .ai/bench/core-stats-<size>.json`
+  4. Run `pnpm bench:run --targets=sql,core --duration=20 --connections=50 --limit=20 --dataset=<size> --scenario=official-sql-core-fixed` five times
+- Aggregation rule: discard run 1 (warmup), report median of runs 2-5
 
-| dataset | docs | eqTokens | presenceTokens | buildMs | memoryApprox |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 10k | 10,005 | 30,057 | 15 | 124.16 | 1.08 MB |
-| 100k | 100,005 | 300,057 | 15 | 1,788.77 | 10.84 MB |
-| 1M | 1,000,005 | 3,000,057 | 15 | 32,953.87 | 108.40 MB |
+### Dataset + Query Notes
 
-## Results (Median of Runs 2-5)
+- Synthetic rows are generated with fixed deterministic distributions for `type`, `capability`, `tag`, `env`, `status`, and `visibility`.
+- `attrs.endpoint` is present in benchmark-generated rows.
+- Restricted rows include `attrs.allowed_group`.
+- Query suites (exact filters from `scripts/bench/run.ts`):
+  - `skill_summarize_prod`: `(&(type=skill)(capability=summarize)(env=prod))` (selective multi-clause conjunction)
+  - `rag_finance_active`: `(&(type=rag)(capability=retrieve)(tag=finance)(status=active))` (selective multi-clause conjunction)
+  - `tag_support`: `(tag=support)` (broad single-attribute equality)
+  - `endpoint_presence`: `(endpoint=*)` (very broad presence query)
+  - `tag_never`: `(tag=__never__)` (zero-hit control query)
 
-### 10k — SQL vs Core
+### Core Stats Snapshots
 
-| target | suite | p50 (ms) | p95 (ms) | p99 (ms) | req/s |
-| --- | --- | ---: | ---: | ---: | ---: |
-| core | endpoint_presence | 4.50 | 9.00 | 10.50 | 9172.6 |
-| core | rag_finance_active | 6.50 | 11.00 | 13.50 | 6588.5 |
-| core | skill_summarize_prod | 6.00 | 11.00 | 12.00 | 7351.0 |
-| core | tag_pdf | 9.00 | 12.50 | 17.00 | 5169.0 |
-| sql | endpoint_presence | 80.00 | 103.0 | 112.5 | 611.1 |
-| sql | rag_finance_active | 58.50 | 80.00 | 93.00 | 817.5 |
-| sql | skill_summarize_prod | 58.50 | 79.50 | 87.00 | 824.0 |
-| sql | tag_pdf | 57.00 | 81.50 | 95.00 | 838.0 |
+| dataset | docs | eqTokens | presenceTokens | postingsCardinality | memoryApprox | buildMs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | 10,005 | 30,059 | 15 | 261,119 | 1,084,496 | 306.95 |
+| 100k | 100,005 | 300,059 | 15 | 2,610,119 | 10,840,496 | 2,156.86 |
+| 1M | 1,000,005 | 3,000,059 | 15 | 26,100,119 | 108,400,496 | 48,278.03 |
 
-### 100k — SQL vs Core
+### Aggregated Results (Median of Runs 2-5)
+
+#### Dataset 10k
 
 | target | suite | p50 (ms) | p95 (ms) | p99 (ms) | req/s |
 | --- | --- | ---: | ---: | ---: | ---: |
-| core | endpoint_presence | 5.00 | 9.00 | 11.50 | 8290.0 |
-| core | rag_finance_active | 14.00 | 20.50 | 27.00 | 3331.5 |
-| core | skill_summarize_prod | 16.50 | 25.50 | 32.50 | 2820.4 |
-| core | tag_pdf | 59.50 | 76.00 | 118.0 | 810.0 |
-| sql | endpoint_presence | 88.00 | 111.5 | 121.0 | 554.3 |
-| sql | rag_finance_active | 64.50 | 89.50 | 98.00 | 750.8 |
-| sql | skill_summarize_prod | 64.00 | 90.00 | 101.0 | 750.3 |
-| sql | tag_pdf | 60.50 | 84.00 | 92.50 | 784.3 |
+| core | endpoint_presence | 11.00 | 16.50 | 22.00 | 4107.8 |
+| core | rag_finance_active | 14.00 | 21.50 | 28.00 | 3311.3 |
+| core | skill_summarize_prod | 39.50 | 59.50 | 73.00 | 1173.1 |
+| core | tag_never | 6.00 | 10.00 | 12.00 | 7467.9 |
+| core | tag_support | 32.50 | 48.50 | 67.00 | 1427.8 |
+| sql | endpoint_presence | 98.00 | 132.0 | 147.0 | 489.9 |
+| sql | rag_finance_active | 73.50 | 107.0 | 115.5 | 648.5 |
+| sql | skill_summarize_prod | 73.00 | 113.0 | 127.0 | 640.4 |
+| sql | tag_never | 76.00 | 114.5 | 145.5 | 618.2 |
+| sql | tag_support | 67.50 | 99.50 | 110.5 | 701.2 |
 
-### 100k — `/v1/search` Forwarded to Core
-
-| target | suite | p50 (ms) | p95 (ms) | p99 (ms) | req/s |
-| --- | --- | ---: | ---: | ---: | ---: |
-| /v1 forwarded | endpoint_presence | 89.50 | 108.0 | 114.0 | 547.9 |
-| /v1 forwarded | rag_finance_active | 63.00 | 77.00 | 91.50 | 770.2 |
-| /v1 forwarded | skill_summarize_prod | 61.50 | 81.50 | 93.00 | 785.2 |
-| /v1 forwarded | tag_pdf | 60.00 | 73.50 | 88.00 | 812.9 |
-
-### 1M — SQL vs Core
+#### Dataset 100k
 
 | target | suite | p50 (ms) | p95 (ms) | p99 (ms) | req/s |
 | --- | --- | ---: | ---: | ---: | ---: |
-| core | endpoint_presence | 6.00 | 15.00 | 16.00 | 6529.9 |
-| core | rag_finance_active | 88.50 | 106.0 | 176.0 | 542.5 |
-| core | skill_summarize_prod | 89.50 | 109.5 | 174.0 | 533.9 |
-| core | tag_pdf | 433.5 | 762.0 | 3633.0 | 102.7 |
-| sql | endpoint_presence | 85.00 | 103.5 | 110.0 | 576.2 |
-| sql | rag_finance_active | 60.50 | 74.50 | 87.50 | 805.8 |
-| sql | skill_summarize_prod | 59.00 | 81.00 | 89.00 | 816.7 |
-| sql | tag_pdf | 59.50 | 74.50 | 87.50 | 819.8 |
+| core | endpoint_presence | 14.50 | 28.00 | 34.50 | 3061.7 |
+| core | rag_finance_active | 120.5 | 248.0 | 298.5 | 362.6 |
+| core | skill_summarize_prod | 27.50 | 40.50 | 53.50 | 1733.0 |
+| core | tag_never | 6.00 | 12.50 | 14.50 | 6791.1 |
+| core | tag_support | 15.00 | 25.50 | 30.50 | 2995.4 |
+| sql | endpoint_presence | 117.0 | 218.5 | 244.5 | 373.8 |
+| sql | rag_finance_active | 80.00 | 137.5 | 154.0 | 573.3 |
+| sql | skill_summarize_prod | 72.00 | 138.5 | 167.5 | 632.5 |
+| sql | tag_never | 90.50 | 171.0 | 184.0 | 506.8 |
+| sql | tag_support | 81.00 | 158.0 | 180.5 | 549.0 |
 
-## Interpretation (Scoped)
+#### Dataset 1M
 
-- On this machine, `eldapo-core` is materially faster than SQL for structured capability filters on 10k and 100k datasets, with p95 speedups from roughly **3.5x to 12x** depending on suite.
-- At 1M scale in the current implementation, core does **not** dominate SQL for all equality filters (`skill_summarize_prod`, `rag_finance_active`, and especially `tag_pdf` regress).
-- Core remains strong on the `endpoint=*` presence workload across all tested sizes.
+| target | suite | p50 (ms) | p95 (ms) | p99 (ms) | req/s |
+| --- | --- | ---: | ---: | ---: | ---: |
+| core | endpoint_presence | 56.50 | 76.00 | 102.0 | 844.8 |
+| core | rag_finance_active | 65.00 | 95.00 | 119.0 | 716.7 |
+| core | skill_summarize_prod | 153.0 | 202.0 | 218.5 | 308.9 |
+| core | tag_never | 7.50 | 18.00 | 20.50 | 5741.8 |
+| core | tag_support | 55.00 | 79.00 | 108.0 | 857.5 |
+| sql | endpoint_presence | 107.0 | 153.0 | 171.5 | 455.2 |
+| sql | rag_finance_active | 78.50 | 112.0 | 124.5 | 619.0 |
+| sql | skill_summarize_prod | 82.50 | 141.5 | 168.5 | 565.8 |
+| sql | tag_never | 82.50 | 116.5 | 126.0 | 576.1 |
+| sql | tag_support | 77.50 | 112.0 | 123.5 | 619.1 |
 
-## Reproduce
+### Scoped Claim
 
-1. Generate/load datasets:
-   - `pnpm bench:generate --sizes=10000,100000,1000000`
-   - `pnpm bench:load --file=.ai/bench/dataset-<size>.jsonl --truncate --batch-size=1000`
-2. Start services:
-   - `pnpm build`
-   - `ELDAPPO_USE_CORE=false pnpm start`
-   - `pnpm core:dev`
-3. Run benchmarks:
-   - `pnpm bench:run --duration=20 --connections=50`
-   - optional forwarded: `ELDAPPO_USE_CORE=true pnpm start` and `pnpm bench:run --only=sql --duration=20 --connections=50`
-4. Aggregate:
-   - `pnpm bench:report`
+- On non-zero-hit suites in this published run, `eldapo-core` is up to `8.4x` faster than the Postgres `jsonb + GIN` baseline (10k `endpoint_presence`, by req/s).
+- Including the zero-hit control (`tag_never`), peak observed speedup is `12.1x`.
+- At 1M scale, `eldapo-core` is faster on `endpoint_presence`, `rag_finance_active`, and `tag_support`, but slower on `skill_summarize_prod` in this configuration.
+- Claim scope is limited to this dataset generator, suite, hardware, and command settings.
 
-Raw benchmark JSON files are intentionally kept under `.ai/bench/` and are not committed.
+### Competitor Race API Note
+
+- Competitor race shims (`redis_sets`, `redisearch`, `openldap`) use an IDs-only contract:
+  - `GET /search?filter=...&limit=...`
+  - response: `{ "ids": ["..."], "count": <number> }`
+- This normalizes payload size when comparing filter engines.
+
+### Reproduce
+
+Bring up dependencies and app:
+
+```bash
+pnpm race:up
+DATABASE_URL=postgres://eldapo:eldapo@127.0.0.1:5432/eldapo pnpm db:migrate
+DATABASE_URL=postgres://eldapo:eldapo@127.0.0.1:5432/eldapo pnpm db:seed
+pnpm build
+DATABASE_URL=postgres://eldapo:eldapo@127.0.0.1:5432/eldapo pnpm start
+```
+
+Run official SQL/Core sweep:
+
+```bash
+for size in 10000 100000 1000000; do
+  DATABASE_URL=postgres://eldapo:eldapo@127.0.0.1:5432/eldapo pnpm bench:load --file=.ai/bench/dataset-${size}.jsonl --truncate
+
+  DATABASE_URL=postgres://eldapo:eldapo@127.0.0.1:5432/eldapo ./node_modules/.bin/tsx src/daemon/server.ts &
+  CORE_PID=$!
+
+  until curl -sf http://127.0.0.1:4100/core/health >/dev/null; do sleep 1; done
+  curl -sS http://127.0.0.1:4100/core/stats > .ai/bench/core-stats-${size}.json
+
+  for run in 1 2 3 4 5; do
+    pnpm bench:run --targets=sql,core --duration=20 --connections=50 --limit=20 --dataset=${size} --scenario=official-sql-core-fixed
+  done
+
+  kill "$CORE_PID"
+done
+
+pnpm bench:report --scenario=official-sql-core-fixed
+```
+
+Validate forwarded `/v1` runs are actually core-backed:
+
+```bash
+ELDAPPO_USE_CORE=true ELDAPPO_CORE_URL=http://127.0.0.1:4100 \
+  pnpm bench:run --targets=v1_forwarded --duration=20 --connections=50 --limit=20
+```
+
+Notes:
+- Benchmark artifacts remain in `.ai/bench/` and are intentionally untracked.
+- Competitor loaders/servers are available via `race:load:*` and `race:serve:*` scripts.

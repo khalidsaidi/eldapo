@@ -87,6 +87,7 @@ async function toNextResponse(response: Response): Promise<NextResponse> {
   if (contentType) {
     headers.set('content-type', contentType);
   }
+  headers.set('x-eldapo-core', '1');
 
   return new NextResponse(payload, {
     status: response.status,

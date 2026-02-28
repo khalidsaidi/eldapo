@@ -5,8 +5,9 @@ LDAP-inspired capability directory API for agents (MCP/RAG/skills), built with N
 Benchmark report: [docs/benchmarks.md](docs/benchmarks.md).
 
 Scoped speed statement:
-- On the benchmark machine in `docs/benchmarks.md`, `eldapo-core` is up to ~12x faster than SQL baseline for structured filters at 10k/100k.
-- At 1M scale, current core behavior regresses on some high-density equality filters, so core is not universally faster yet.
+- On the published `official-sql-core-fixed` suite, `eldapo-core` is up to `8.4x` faster than the Postgres `jsonb + GIN` baseline on non-zero-hit suites (10k `endpoint_presence`, measured by req/s).
+- At `1M`, `eldapo-core` remains faster on `endpoint_presence`, `rag_finance_active`, and `tag_support`, but slower on `skill_summarize_prod`.
+- Claims are intentionally limited to the commands, dataset generator, and hardware documented in [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Features
 
@@ -200,10 +201,37 @@ Load a dataset:
 pnpm bench:load --file=.ai/bench/dataset-10000.jsonl --truncate
 ```
 
-Run latency/QPS comparison (SQL + core):
+Run SQL/Core latency/QPS comparison:
 
 ```bash
-pnpm bench:run
+pnpm bench:run --targets=sql,core
+```
+
+Run full race targets:
+
+```bash
+pnpm bench:run --targets=sql,core,redis_sets,redisearch,openldap
+```
+
+Run the published SQL/Core official suite:
+
+```bash
+pnpm bench:run --targets=sql,core --duration=20 --connections=50 --limit=20 --dataset=100000 --scenario=official-sql-core-fixed
+```
+
+Validate forwarded `/v1` runs are truly core-backed:
+
+```bash
+ELDAPPO_USE_CORE=true ELDAPPO_CORE_URL=http://127.0.0.1:4100 \
+  pnpm bench:run --targets=v1_forwarded --duration=20 --connections=50 --limit=20
+```
+
+Race targets expose an IDs-only `/search` response (`{ ids, count }`) to normalize payload size across engines.
+
+Bring up race dependencies:
+
+```bash
+pnpm race:up
 ```
 
 Render aggregated markdown from raw runs:
@@ -250,3 +278,12 @@ Set env vars:
 - `pnpm bench:load --file=...`
 - `pnpm bench:run`
 - `pnpm bench:report`
+- `pnpm race:up`
+- `pnpm race:down`
+- `pnpm race:load:redis-sets --file=...`
+- `pnpm race:load:redisearch --file=...`
+- `pnpm race:load:ldap --file=...`
+- `pnpm race:serve:redis-sets`
+- `pnpm race:serve:redisearch`
+- `pnpm race:serve:ldap`
+- `pnpm race:prep:10k`

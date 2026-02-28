@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "core:dev": "tsx src/daemon/server.ts",
+    "race:serve:redis-sets": "tsx src/competitors/redisSets/server.ts",
+    "race:serve:redisearch": "tsx src/competitors/redisearch/server.ts",
+    "race:serve:ldap": "tsx src/competitors/openldap/server.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -17,14 +20,22 @@
     "bench:generate": "tsx scripts/bench/generate.ts",
     "bench:load": "tsx scripts/bench/load.ts",
     "bench:run": "tsx scripts/bench/run.ts",
-    "bench:report": "tsx scripts/bench/report.ts"
+    "bench:report": "tsx scripts/bench/report.ts",
+    "race:up": "docker compose -f docker-compose.yml -f docker-compose.race.yml up -d",
+    "race:down": "docker compose -f docker-compose.yml -f docker-compose.race.yml down -v",
+    "race:load:redis-sets": "tsx scripts/race/load-redis-sets.ts --file=.ai/bench/dataset-100000.jsonl --flush",
+    "race:load:redisearch": "tsx scripts/race/load-redisearch.ts --file=.ai/bench/dataset-100000.jsonl --flush",
+    "race:load:ldap": "tsx scripts/race/load-ldap.ts --file=.ai/bench/dataset-100000.jsonl --flush",
+    "race:prep:10k": "pnpm bench:generate --sizes=10000 && DATABASE_URL=${DATABASE_URL:-postgres://eldapo:eldapo@127.0.0.1:5432/eldapo} pnpm bench:load --file=.ai/bench/dataset-10000.jsonl --truncate && pnpm race:load:redis-sets --file=.ai/bench/dataset-10000.jsonl && pnpm race:load:redisearch --file=.ai/bench/dataset-10000.jsonl && pnpm race:load:ldap --file=.ai/bench/dataset-10000.jsonl"
   },
   "dependencies": {
     "dotenv": "^17.3.1",
+    "ldapts": "^8.1.6",
     "next": "16.1.6",
     "postgres": "^3.4.8",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "redis": "^5.11.0",
     "roaring-wasm": "^1.1.0",
     "zod": "^4.3.6"
   },
