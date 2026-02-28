@@ -103,13 +103,17 @@ async function main(): Promise<void> {
 
   for (const target of targets) {
     if (target.validateCoreHeader) {
-      await validateForwardedTargetHeader(target, limit);
+      await validateForwardedTargetHeader(target, limit, args.raceMode);
     }
 
     for (const suite of suites) {
       const benchUrl = new URL(target.url);
       benchUrl.searchParams.set('filter', suite.filter);
       benchUrl.searchParams.set('limit', String(limit));
+      if (args.raceMode) {
+        benchUrl.searchParams.set('view', 'ids');
+        benchUrl.searchParams.set('sort', 'none');
+      }
 
       console.log(`running ${target.name} ${suite.name} -> ${benchUrl.toString()}`);
       const result = await runAutocannon({
@@ -150,6 +154,7 @@ async function main(): Promise<void> {
         connections,
         limit,
         targets: selectedTargetNames,
+        race_mode: args.raceMode,
         suites,
         summaries,
       },
@@ -192,11 +197,19 @@ function buildBuiltinTargets(args: ParsedArgs): TargetConfig[] {
   ];
 }
 
-async function validateForwardedTargetHeader(target: TargetConfig, limit: number): Promise<void> {
+async function validateForwardedTargetHeader(
+  target: TargetConfig,
+  limit: number,
+  raceMode: boolean,
+): Promise<void> {
   const validationSuite = suites[0];
   const validationUrl = new URL(target.url);
   validationUrl.searchParams.set('filter', validationSuite.filter);
   validationUrl.searchParams.set('limit', String(limit));
+  if (raceMode) {
+    validationUrl.searchParams.set('view', 'ids');
+    validationUrl.searchParams.set('sort', 'none');
+  }
 
   const response = await fetch(validationUrl.toString());
   const marker = response.headers.get('x-eldapo-core');
@@ -266,11 +279,13 @@ type ParsedArgs = {
   limit?: number;
   dataset?: string;
   scenario?: string;
+  raceMode: boolean;
 };
 
 function parseArgs(argv: string[]): ParsedArgs {
   const parsed: ParsedArgs = {
     customTargets: [],
+    raceMode: false,
   };
 
   for (const arg of argv) {
@@ -347,6 +362,11 @@ function parseArgs(argv: string[]): ParsedArgs {
 
     if (arg.startsWith('--scenario=')) {
       parsed.scenario = arg.slice('--scenario='.length);
+      continue;
+    }
+
+    if (arg === '--race-mode') {
+      parsed.raceMode = true;
     }
   }
 

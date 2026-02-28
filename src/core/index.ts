@@ -35,6 +35,7 @@ export type CoreSearchOptions = {
   limit: number;
   cursor: SearchCursor | null;
   q?: string;
+  sort?: 'updated_at_desc' | 'none';
 };
 
 export type CoreSearchHit = {
@@ -118,6 +119,7 @@ export class InMemoryCoreIndex implements CoreIndex {
     const limit = Math.min(Math.max(options.limit, 1), 200);
     const q = options.q?.trim().toLowerCase();
     const hasQ = Boolean(q);
+    const sort = options.sort ?? 'updated_at_desc';
     const allowed = this.getAllowedDocs(requester);
     if (allowed.isEmpty) {
       allowed.dispose();
@@ -130,13 +132,15 @@ export class InMemoryCoreIndex implements CoreIndex {
     if (!filterAst) {
       try {
         const items: CoreSearchHit[] = [];
-        const nextCursor = this.collectScanAllowedResults(
-          allowed,
-          options,
-          hasQ ? (q as string) : null,
-          limit,
-          items,
-        );
+        if (sort === 'none') {
+          this.collectUnorderedBitmapResults(allowed, hasQ ? (q as string) : null, limit, items);
+          return {
+            items,
+            next_cursor: null,
+          };
+        }
+
+        const nextCursor = this.collectScanAllowedResults(allowed, options, hasQ ? (q as string) : null, limit, items);
 
         return {
           items,
@@ -175,6 +179,14 @@ export class InMemoryCoreIndex implements CoreIndex {
     try {
       const items: CoreSearchHit[] = [];
       let nextCursor: string | null = null;
+
+      if (sort === 'none') {
+        this.collectUnorderedBitmapResults(candidates, hasQ ? (q as string) : null, limit, items);
+        return {
+          items,
+          next_cursor: null,
+        };
+      }
 
       const selectiveByThreshold = candidates.size <= SELECTIVE_RETRIEVAL_THRESHOLD;
       const selectiveByRatio =
@@ -495,6 +507,33 @@ export class InMemoryCoreIndex implements CoreIndex {
     }
 
     return null;
+  }
+
+  private collectUnorderedBitmapResults(
+    bitmap: RoaringBitmap32,
+    q: string | null,
+    limit: number,
+    items: CoreSearchHit[],
+  ): void {
+    for (const docId of bitmap) {
+      const indexed = this.docs.get(docId);
+      if (!indexed) {
+        continue;
+      }
+
+      if (q && !matchesQuery(indexed, q)) {
+        continue;
+      }
+
+      items.push({
+        entry: indexed.entry,
+        card: indexed.card,
+      });
+
+      if (items.length >= limit) {
+        return;
+      }
+    }
   }
 
   private collectSelectiveResults(

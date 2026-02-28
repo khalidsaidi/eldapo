@@ -213,6 +213,12 @@ Run full race targets:
 pnpm bench:run --targets=sql,core,redis_sets,redisearch,openldap
 ```
 
+Run fair race mode (IDs-only + unordered semantics across targets):
+
+```bash
+pnpm bench:run --targets=sql,core,redis_sets,redisearch,openldap --race-mode
+```
+
 Run the published SQL/Core official suite:
 
 ```bash

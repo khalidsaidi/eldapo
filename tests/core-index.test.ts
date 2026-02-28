@@ -137,6 +137,29 @@ describe('InMemoryCoreIndex', () => {
     expect(page2.items.map((item) => item.entry.id)).toEqual(['skill:acme:older']);
   });
 
+  it('supports unordered sort mode for race fairness', () => {
+    const index = new InMemoryCoreIndex();
+
+    index.buildFromSnapshot([
+      makeEntry({
+        id: 'skill:acme:older',
+        updated_at: '2026-01-01T00:00:00.000Z',
+      }),
+      makeEntry({
+        id: 'skill:acme:newer',
+        updated_at: '2026-01-02T00:00:00.000Z',
+      }),
+    ]);
+
+    const requester = parseRequester(new Request('http://localhost'));
+    const result = index.search(null, { limit: 2, cursor: null, sort: 'none' }, requester);
+
+    expect(result.next_cursor).toBeNull();
+    expect(new Set(result.items.map((item) => item.entry.id))).toEqual(
+      new Set(['skill:acme:older', 'skill:acme:newer']),
+    );
+  });
+
   it('applies newer change revisions and keeps read fast', () => {
     const index = new InMemoryCoreIndex();
 
