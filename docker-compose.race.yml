@@ -1,0 +1,25 @@
+services:
+  redis_sets:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+
+  redisearch:
+    image: redis/redis-stack-server:latest
+    restart: unless-stopped
+    ports:
+      - '6380:6379'
+      - '8001:8001'
+
+  openldap:
+    image: osixia/openldap:1.5.0
+    restart: unless-stopped
+    environment:
+      LDAP_ORGANISATION: 'eldapo'
+      LDAP_DOMAIN: 'eldapo.local'
+      LDAP_ADMIN_PASSWORD: 'admin'
+      LDAP_TLS: 'false'
+    ports:
+      - '3890:389'
+      - '6360:636'
