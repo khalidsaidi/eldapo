@@ -85,6 +85,9 @@ Core-forwarded read mode:
 - When `ELDAPPO_USE_CORE=true`, `/v1/search`, latest `/v1/entries/{id}`, and `/v1/batchGet` are forwarded to `eldapo-core` if reachable.
 - If core is unreachable, routes fall back to SQL path.
 - Core keeps an in-memory inverted index built from `entries_latest` and refreshed by polling `changes`.
+- Core retrieval is adaptive:
+  - For selective filters (small candidate bitmaps), it iterates candidate doc IDs directly and sorts only that subset.
+  - For broad filters, it keeps the `updatedOrder` scan path to avoid sorting very large candidate sets.
 
 ## Change Feed
 

@@ -38,11 +38,27 @@ describe('InMemoryCoreIndex', () => {
     expect(result.items.map((item) => item.entry.id)).toEqual(['skill:acme:pdf-summarize']);
   });
 
-  it('enforces visibility with requester groups', () => {
+  it('enforces visibility bitmaps for internal and restricted entries', () => {
     process.env.ELDAPPO_TRUSTED_HEADERS = 'true';
 
     const index = new InMemoryCoreIndex();
     index.buildFromSnapshot([
+      makeEntry({
+        id: 'skill:acme:public',
+        type: 'skill',
+        attrs: {
+          visibility: ['public'],
+          capability: ['summarize'],
+        },
+      }),
+      makeEntry({
+        id: 'skill:acme:internal',
+        type: 'skill',
+        attrs: {
+          visibility: ['internal'],
+          capability: ['summarize'],
+        },
+      }),
       makeEntry({
         id: 'rag:acme:sec-filings',
         type: 'rag',
@@ -54,9 +70,17 @@ describe('InMemoryCoreIndex', () => {
       }),
     ]);
 
-    const filter = parseFilter('(id=rag:acme:sec-filings)');
+    const filter = parseFilter('(|(id=skill:acme:public)(id=skill:acme:internal)(id=rag:acme:sec-filings))');
 
     const anonymous = parseRequester(new Request('http://localhost'));
+    const authenticatedNoGroup = parseRequester(
+      new Request('http://localhost', {
+        headers: {
+          authorization: 'Bearer test',
+          'x-eldapo-sub': 'user-2',
+        },
+      }),
+    );
     const authorized = parseRequester(
       new Request('http://localhost', {
         headers: {
@@ -67,13 +91,21 @@ describe('InMemoryCoreIndex', () => {
       }),
     );
 
-    expect(
-      index.search(filter, { limit: 20, cursor: null }, anonymous).items,
-    ).toHaveLength(0);
+    expect(index.search(filter, { limit: 20, cursor: null }, anonymous).items.map((item) => item.entry.id)).toEqual([
+      'skill:acme:public',
+    ]);
 
     expect(
-      index.search(filter, { limit: 20, cursor: null }, authorized).items,
-    ).toHaveLength(1);
+      index
+        .search(filter, { limit: 20, cursor: null }, authenticatedNoGroup)
+        .items.map((item) => item.entry.id),
+    ).toEqual(['skill:acme:public', 'skill:acme:internal']);
+
+    expect(index.search(filter, { limit: 20, cursor: null }, authorized).items.map((item) => item.entry.id)).toEqual([
+      'skill:acme:public',
+      'skill:acme:internal',
+      'rag:acme:sec-filings',
+    ]);
   });
 
   it('supports cursor pagination ordered by updated_at desc then id desc', () => {
